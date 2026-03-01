@@ -16,7 +16,7 @@ logger = logging.getLogger("pagani.rag_pipeline")
 # ── Gemini Configuration ──
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-GENERATION_MODEL = "gemini-2.0-flash"
+GENERATION_MODEL = "gemini-2.5-flash-lite"
 
 # ── Safety Settings ── Block nothing for enterprise use
 SAFETY_SETTINGS = {
