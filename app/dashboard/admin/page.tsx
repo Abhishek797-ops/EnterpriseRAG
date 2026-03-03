@@ -54,9 +54,9 @@ const REVENUE_DATA = [
 ];
 
 const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-    admin: { bg: "rgba(212,175,55,0.12)", text: "#FFD700", border: "rgba(212,175,55,0.3)" },
-    engineer: { bg: "rgba(59,130,246,0.12)", text: "#60A5FA", border: "rgba(59,130,246,0.3)" },
-    viewer: { bg: "rgba(156,163,175,0.12)", text: "#9CA3AF", border: "rgba(156,163,175,0.3)" },
+    admin: { bg: "rgba(255,215,0,0.15)", text: "#FFD700", border: "rgba(255,215,0,0.4)" },
+    engineer: { bg: "rgba(56,189,248,0.15)", text: "#38BDF8", border: "rgba(56,189,248,0.4)" },
+    viewer: { bg: "rgba(156,163,175,0.15)", text: "#D1D5DB", border: "rgba(156,163,175,0.4)" },
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -192,11 +192,18 @@ export default function AdminDashboard() {
        ═══════════════════════════════════════════════════════════════ */
 
     return (
-        <div className="min-h-screen bg-pagani-black text-white">
+        <div className="min-h-screen relative text-white bg-[#0A0A0A] overflow-hidden">
+            {/* ── Background Effects ── */}
+            <div className="fixed inset-0 pointer-events-none z-0">
+                <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-[#D4AF37]/10 rounded-full blur-[120px]" />
+                <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-[#2A2A2A]/40 rounded-full blur-[100px]" />
+                <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDUiLz4KPC9zdmc+')] opacity-20 mix-blend-overlay" />
+            </div>
+
             {/* ── Top Bar ── */}
             <header
-                className="sticky top-0 z-50 backdrop-blur-xl border-b border-white/5"
-                style={{ background: "rgba(26,26,26,0.85)" }}
+                className="sticky top-0 z-50 backdrop-blur-2xl border-b border-white/10"
+                style={{ background: "rgba(10,10,10,0.6)" }}
             >
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 flex items-center justify-between h-14">
                     <div className="flex items-center gap-4">
@@ -233,7 +240,7 @@ export default function AdminDashboard() {
             </header>
 
             {/* ── Main Content ── */}
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8 lg:py-10 space-y-8">
+            <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8 lg:py-10 space-y-8">
                 {/* ── Hero Stats ── */}
                 <motion.div
                     className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
@@ -276,24 +283,25 @@ export default function AdminDashboard() {
                             key={stat.label}
                             variants={fadeUp}
                             custom={i}
-                            className="group relative rounded-xl p-5 transition-all duration-300 hover:-translate-y-0.5"
+                            className="group relative rounded-2xl p-5 transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl hover:shadow-pagani-gold/10 overflow-hidden backdrop-blur-xl"
                             style={{
-                                background:
-                                    "linear-gradient(145deg, rgba(42,42,42,0.5) 0%, rgba(26,26,26,0.8) 100%)",
+                                background: "linear-gradient(145deg, rgba(30,30,30,0.6) 0%, rgba(15,15,15,0.8) 100%)",
                                 border: stat.accent
-                                    ? "1px solid rgba(255,215,0,0.2)"
-                                    : "1px solid rgba(255,255,255,0.05)",
-                                boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+                                    ? "1px solid rgba(255,215,0,0.25)"
+                                    : "1px solid rgba(255,255,255,0.08)",
+                                boxShadow: "inset 0 1px 1px rgba(255,255,255,0.05), 0 8px 32px rgba(0,0,0,0.4)",
                             }}
                         >
                             <div
-                                className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                                className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
                                 style={{
-                                    boxShadow:
-                                        "inset 0 0 30px rgba(255,215,0,0.04), 0 0 15px rgba(255,215,0,0.03)",
+                                    boxShadow: stat.accent ? "inset 0 0 30px rgba(255,215,0,0.08)" : "inset 0 0 30px rgba(255,255,255,0.03)",
                                 }}
                             />
-                            <p className="text-[10px] text-gray-500 uppercase tracking-[0.15em] mb-2">
+                            {/* Glass reflection */}
+                            <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+
+                            <p className="text-[10px] text-gray-400 uppercase tracking-[0.2em] mb-2 font-medium z-10 relative">
                                 {stat.label}
                             </p>
                             <p
@@ -320,12 +328,10 @@ export default function AdminDashboard() {
                         initial="hidden"
                         animate="visible"
                         custom={4}
-                        className="rounded-xl p-6"
+                        className="rounded-2xl p-6 relative overflow-hidden backdrop-blur-xl transition-all duration-500 hover:shadow-2xl hover:shadow-pagani-gold/5 border border-white/5 hover:border-white/10"
                         style={{
-                            background:
-                                "linear-gradient(145deg, rgba(42,42,42,0.45) 0%, rgba(26,26,26,0.8) 100%)",
-                            border: "1px solid rgba(255,255,255,0.05)",
-                            boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+                            background: "linear-gradient(145deg, rgba(30,30,30,0.5) 0%, rgba(15,15,15,0.8) 100%)",
+                            boxShadow: "inset 0 1px 1px rgba(255,255,255,0.05), 0 8px 32px rgba(0,0,0,0.4)",
                         }}
                     >
                         <h3
@@ -378,12 +384,10 @@ export default function AdminDashboard() {
                         initial="hidden"
                         animate="visible"
                         custom={5}
-                        className="rounded-xl p-6"
+                        className="rounded-2xl p-6 relative overflow-hidden backdrop-blur-xl transition-all duration-500 hover:shadow-2xl hover:shadow-pagani-gold/5 border border-white/5 hover:border-white/10"
                         style={{
-                            background:
-                                "linear-gradient(145deg, rgba(42,42,42,0.45) 0%, rgba(26,26,26,0.8) 100%)",
-                            border: "1px solid rgba(255,255,255,0.05)",
-                            boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+                            background: "linear-gradient(145deg, rgba(30,30,30,0.5) 0%, rgba(15,15,15,0.8) 100%)",
+                            boxShadow: "inset 0 1px 1px rgba(255,255,255,0.05), 0 8px 32px rgba(0,0,0,0.4)",
                         }}
                     >
                         <h3
@@ -434,12 +438,10 @@ export default function AdminDashboard() {
                         initial="hidden"
                         animate="visible"
                         custom={6}
-                        className="rounded-xl p-6"
+                        className="rounded-2xl p-6 relative overflow-hidden backdrop-blur-xl transition-all duration-500 hover:shadow-2xl hover:shadow-pagani-gold/5 border border-white/5 hover:border-white/10"
                         style={{
-                            background:
-                                "linear-gradient(145deg, rgba(42,42,42,0.45) 0%, rgba(26,26,26,0.8) 100%)",
-                            border: "1px solid rgba(255,255,255,0.05)",
-                            boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+                            background: "linear-gradient(145deg, rgba(30,30,30,0.5) 0%, rgba(15,15,15,0.8) 100%)",
+                            boxShadow: "inset 0 1px 1px rgba(255,255,255,0.05), 0 8px 32px rgba(0,0,0,0.4)",
                         }}
                     >
                         <div className="flex items-center justify-between mb-5">
@@ -507,12 +509,10 @@ export default function AdminDashboard() {
                         initial="hidden"
                         animate="visible"
                         custom={7}
-                        className="rounded-xl p-6"
+                        className="rounded-2xl p-6 relative overflow-hidden backdrop-blur-xl transition-all duration-500 hover:shadow-2xl hover:shadow-pagani-gold/5 border border-white/5 hover:border-white/10"
                         style={{
-                            background:
-                                "linear-gradient(145deg, rgba(42,42,42,0.45) 0%, rgba(26,26,26,0.8) 100%)",
-                            border: "1px solid rgba(255,255,255,0.05)",
-                            boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
+                            background: "linear-gradient(145deg, rgba(30,30,30,0.5) 0%, rgba(15,15,15,0.8) 100%)",
+                            boxShadow: "inset 0 1px 1px rgba(255,255,255,0.05), 0 8px 32px rgba(0,0,0,0.4)",
                         }}
                     >
                         <div className="flex items-center justify-between mb-5">
@@ -584,60 +584,75 @@ export default function AdminDashboard() {
                     </div>
 
                     <div
-                        className="rounded-xl overflow-hidden"
+                        className="rounded-2xl overflow-hidden relative backdrop-blur-2xl"
                         style={{
-                            background:
-                                "linear-gradient(145deg, rgba(42,42,42,0.5) 0%, rgba(26,26,26,0.85) 100%)",
-                            border: "1px solid rgba(255,215,0,0.12)",
-                            boxShadow: "0 4px 30px rgba(0,0,0,0.3)",
+                            background: "linear-gradient(145deg, rgba(20,20,20,0.8) 0%, rgba(10,10,10,0.95) 100%)",
+                            border: "1px solid rgba(255,215,0,0.2)",
+                            boxShadow: "0 0 40px rgba(255,215,0,0.05), inset 0 1px 1px rgba(255,255,255,0.05)",
                         }}
                     >
+                        {/* Terminal raster scanline effect */}
+                        <div className="absolute inset-0 pointer-events-none opacity-5 mix-blend-overlay bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDUiLz4KPC9zdmc+')]" />
+
                         {/* Input */}
-                        <form onSubmit={handleQuery} className="flex border-b border-white/5">
+                        <form onSubmit={handleQuery} className="flex border-b border-pagani-gold/20 focus-within:border-pagani-gold/50 transition-colors bg-black/40">
                             <input
                                 type="text"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                placeholder="Ask an executive-level question…"
+                                placeholder="[INPUT REQUIRED]: Enter executive intelligence query..."
                                 disabled={querying}
-                                className="flex-1 bg-transparent text-sm text-white outline-none placeholder-gray-600 px-5 py-4 disabled:opacity-40"
+                                className="flex-1 bg-transparent text-sm text-pagani-gold outline-none placeholder-pagani-gold/30 px-6 py-5 disabled:opacity-40"
                                 style={{ fontFamily: "var(--font-rajdhani)" }}
                             />
                             <button
                                 type="submit"
                                 disabled={querying || !query.trim()}
-                                className="px-6 text-xs text-bright-gold uppercase tracking-wider hover:bg-bright-gold/10 transition-colors disabled:opacity-30 border-l border-white/5"
+                                className="px-8 text-xs text-pagani-black font-bold uppercase tracking-widest bg-pagani-gold hover:bg-bright-gold hover:shadow-[0_0_20px_rgba(255,215,0,0.4)] transition-all disabled:opacity-30 disabled:hover:shadow-none border-l border-white/5"
                                 style={{ fontFamily: "var(--font-orbitron)" }}
                             >
                                 {querying ? (
                                     <motion.span
                                         animate={{ opacity: [0.4, 1, 0.4] }}
                                         transition={{ repeat: Infinity, duration: 1.2 }}
+                                        className="flex items-center gap-2"
                                     >
-                                        Analyzing…
+                                        <div className="w-2 h-2 rounded-full bg-black animate-pulse" />
+                                        PROCESSING
                                     </motion.span>
                                 ) : (
-                                    "Query"
+                                    "EXECUTE"
                                 )}
                             </button>
                         </form>
 
                         {/* Response Panel */}
-                        <div className="min-h-[120px] p-5">
+                        <div className="min-h-[120px] p-6 bg-black/20">
                             {!response && !queryError && !querying && (
-                                <p className="text-gray-600 text-xs italic">
-                                    Intelligence responses will appear here. Query the Pagani enterprise knowledge base above.
-                                </p>
+                                <div className="flex flex-col items-center justify-center h-full space-y-2 opacity-30">
+                                    <div className="w-8 h-[1px] bg-pagani-gold" />
+                                    <p className="text-pagani-gold text-[10px] uppercase tracking-[0.2em] font-medium">
+                                        System Ready: Awaiting Query
+                                    </p>
+                                    <div className="w-8 h-[1px] bg-pagani-gold" />
+                                </div>
                             )}
 
                             {querying && (
-                                <div className="flex items-center gap-3 text-gray-500 text-xs">
-                                    <motion.div
-                                        animate={{ rotate: 360 }}
-                                        transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                                        className="w-4 h-4 border border-bright-gold/30 border-t-bright-gold rounded-full"
-                                    />
-                                    Processing executive intelligence query…
+                                <div className="flex flex-col items-center justify-center py-4 space-y-4">
+                                    <div className="relative">
+                                        <motion.div
+                                            animate={{ rotate: 360 }}
+                                            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                                            className="w-10 h-10 border border-pagani-gold/20 border-t-pagani-gold rounded-full"
+                                        />
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <div className="w-1 h-1 bg-pagani-gold rounded-full animate-ping" />
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-pagani-gold/60 uppercase tracking-[0.3em] animate-pulse">
+                                        Decrypting Intelligence...
+                                    </p>
                                 </div>
                             )}
 
