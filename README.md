@@ -38,9 +38,11 @@ Frontend (Next.js 16 + Tailwind v4)       Backend (FastAPI + Gemini)
 ## ✨ Core Features
 
 ### 🧠 Enterprise RAG Agent
-- **Semantic Vector Search:** FAISS index storing high-dimensional `gemini-embedding-001` embeddings of internal Pagani documents.
-- **Strict Role-Based Access Control (RBAC):** RAG context generation is strictly filtered by JWT claims. Viewers cannot retrieve engineering telemetry; Engineers cannot retrieve financial ownership data. 
-- **Zero Hallucination Tolerance:** The system prompt forces the Gemini 1.5 Pro model to answer *only* from the retrieved enterprise context or politely decline.
+- **Agentic Routing:** Gemini 2.5 Flash actively decides whether to formulate search queries or answer conversationally, saving DB compute.
+- **Conversational Memory:** Contextual session storage mapping user JWTs to rolling chat histories for intelligent follow-ups.
+- **Hybrid Search (RRF):** FAISS semantic embeddings combined with Term Frequency (TF) keyword matching via Reciprocal Rank Fusion for pinpoint specification retrieval.
+- **Strict Role-Based Access Control (RBAC):** RAG context generation is strictly filtered by JWT claims. Viewers cannot retrieve engineering telemetry.
+- **Zero Hallucination Tolerance:** The system prompt forces answers *only* from retrieved enterprise context.
 - **Streaming Responses:** Real-time token-by-token generation via Server-Sent Events (SSE).
 
 ### 🛡️ Dynamic Authentication & Routing
