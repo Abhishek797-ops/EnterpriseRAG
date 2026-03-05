@@ -405,6 +405,127 @@ class VectorStore:
         )
         return final_results
 
+    def search_with_debug(self, query: str, top_k: int = 5, user_role: str = "viewer", filters: dict = None) -> dict:
+        """
+        Debug-enhanced search that returns results + full pipeline trace.
+        Does NOT modify the core search logic — wraps the same calls with timing.
+        """
+        import time as _time
+
+        debug_info = {
+            "pipeline_steps": [],
+            "search_results": [],
+            "retrieved_chunks": [],
+            "timing": {},
+            "router_decision": None,
+        }
+
+        t_start = _time.time()
+
+        # Step 1: Embed query
+        debug_info["pipeline_steps"].append({
+            "step": "query_received", "label": "Query Received",
+            "timestamp_ms": 0
+        })
+
+        t_embed = _time.time()
+        if not self._initialized:
+            self.initialize()
+
+        query_embedding = self._embed_query(query)
+        faiss.normalize_L2(query_embedding)
+        embed_ms = int((_time.time() - t_embed) * 1000)
+
+        debug_info["pipeline_steps"].append({
+            "step": "query_embedded", "label": "Query Embedded",
+            "timestamp_ms": int((_time.time() - t_start) * 1000)
+        })
+        debug_info["timing"]["embedding_ms"] = embed_ms
+
+        # Step 2: FAISS + keyword search
+        t_search = _time.time()
+        search_k = min(top_k * 3, self.index.ntotal)
+        scores, indices = self.index.search(query_embedding, search_k)
+
+        semantic_results = []
+        for score, idx in zip(scores[0], indices[0]):
+            if idx == -1:
+                continue
+            doc = self.documents[idx]
+            if user_role not in doc["role_access"]:
+                continue
+            if filters:
+                match = True
+                for k, v in filters.items():
+                    if k == "model" and v.lower() not in doc["source"].lower():
+                        match = False
+                if not match:
+                    continue
+            semantic_results.append({"idx": idx, "score": float(score), "doc": doc})
+
+        keyword_results = self._keyword_search(query, user_role, search_k)
+        search_ms = int((_time.time() - t_search) * 1000)
+
+        debug_info["pipeline_steps"].append({
+            "step": "vector_search", "label": "Vector Search Performed",
+            "timestamp_ms": int((_time.time() - t_start) * 1000)
+        })
+        debug_info["timing"]["search_ms"] = search_ms
+
+        # Collect raw search results for debug display
+        for res in semantic_results[:10]:
+            debug_info["search_results"].append({
+                "source": res["doc"]["source"],
+                "similarity": round(res["score"], 4),
+                "chunk_preview": res["doc"]["content"][:150].replace("\n", " ")
+            })
+
+        # Step 3: RRF fusion
+        rrf_k = 60
+        fused_scores = {}
+        for rank, res in enumerate(semantic_results):
+            fused_scores[res["idx"]] = fused_scores.get(res["idx"], 0) + 1.0 / (rrf_k + rank + 1)
+        for rank, res in enumerate(keyword_results):
+            fused_scores[res["idx"]] = fused_scores.get(res["idx"], 0) + 1.0 / (rrf_k + rank + 1)
+
+        fused_results = sorted(list(fused_scores.items()), key=lambda x: x[1], reverse=True)
+        candidates = []
+        for idx, _ in fused_results[:search_k]:
+            candidates.append({"idx": idx, "doc": self.documents[idx], "score": 0.0})
+
+        # Step 4: LLM reranking
+        t_rerank = _time.time()
+        reranked_results = self._llm_rerank(query, candidates, top_k=top_k)
+        rerank_ms = int((_time.time() - t_rerank) * 1000)
+
+        debug_info["pipeline_steps"].append({
+            "step": "reranking", "label": "LLM Reranking",
+            "timestamp_ms": int((_time.time() - t_start) * 1000)
+        })
+        debug_info["timing"]["reranking_ms"] = rerank_ms
+
+        # Build final results + debug chunks
+        final_results = []
+        for res in reranked_results:
+            doc = res["doc"]
+            final_results.append({
+                "content": doc["content"],
+                "source": doc["source"],
+                "score": res["score"],
+            })
+            debug_info["retrieved_chunks"].append({
+                "source": doc["source"],
+                "content": doc["content"][:600],
+                "relevance_score": res["score"],
+            })
+
+        debug_info["pipeline_steps"].append({
+            "step": "context_built", "label": "Context Constructed",
+            "timestamp_ms": int((_time.time() - t_start) * 1000)
+        })
+
+        return {"results": final_results, "debug": debug_info, "_t_start": t_start}
+
 
 # Singleton instance
 vector_store = VectorStore()
