@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { apiFetch } from "@/lib/api";
 import { getUser, logout, type UserInfo } from "@/lib/auth";
+import RAGDebugPanel, { DebugLoadingSteps, type DebugData } from "@/components/RAGDebugPanel";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -121,6 +122,11 @@ export default function AdminDashboard() {
     const [queryError, setQueryError] = useState("");
     const [querying, setQuerying] = useState(false);
 
+    // Debug mode state
+    const [debugMode, setDebugMode] = useState(false);
+    const [debugData, setDebugData] = useState<DebugData | null>(null);
+    const [loadingStep, setLoadingStep] = useState<string>("");
+
     /* ── Auth Verification ── */
     useEffect(() => {
         (async () => {
@@ -150,14 +156,37 @@ export default function AdminDashboard() {
             setQuerying(true);
             setQueryError("");
             setResponse(null);
+            setDebugData(null);
 
             try {
-                const data = await apiFetch<ChatResponse>("/api/chat", {
-                    method: "POST",
-                    body: JSON.stringify({ question: q }),
-                });
-                setResponse(data);
+                if (debugMode) {
+                    // Animated loading steps
+                    setLoadingStep("embedding");
+                    await new Promise((r) => setTimeout(r, 300));
+                    setLoadingStep("searching");
+                    await new Promise((r) => setTimeout(r, 200));
+                    setLoadingStep("retrieving");
+                    await new Promise((r) => setTimeout(r, 200));
+                    setLoadingStep("reranking");
+
+                    const data = await apiFetch<ChatResponse & { debug: DebugData }>("/api/chat/debug", {
+                        method: "POST",
+                        body: JSON.stringify({ question: q }),
+                    });
+                    setLoadingStep("generating");
+                    await new Promise((r) => setTimeout(r, 150));
+                    setLoadingStep("");
+                    setResponse(data);
+                    setDebugData(data.debug);
+                } else {
+                    const data = await apiFetch<ChatResponse>("/api/chat", {
+                        method: "POST",
+                        body: JSON.stringify({ question: q }),
+                    });
+                    setResponse(data);
+                }
             } catch (err: unknown) {
+                setLoadingStep("");
                 setQueryError(err instanceof Error ? err.message : "Query failed.");
             } finally {
                 setQuerying(false);
@@ -573,14 +602,37 @@ export default function AdminDashboard() {
                     animate="visible"
                     custom={8}
                 >
-                    <div className="flex items-center gap-2 mb-3">
-                        <div className="w-2 h-2 rounded-full bg-bright-gold animate-pulse" />
-                        <p
-                            className="text-xs text-bright-gold/80 uppercase tracking-[0.2em]"
-                            style={{ fontFamily: "var(--font-orbitron)" }}
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-bright-gold animate-pulse" />
+                            <p
+                                className="text-xs text-bright-gold/80 uppercase tracking-[0.2em]"
+                                style={{ fontFamily: "var(--font-orbitron)" }}
+                            >
+                                Executive Intelligence Console
+                            </p>
+                        </div>
+                        {/* Debug Mode Toggle */}
+                        <button
+                            onClick={() => setDebugMode(!debugMode)}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wider font-semibold transition-all border ${debugMode
+                                    ? "bg-[#FFD700]/10 text-[#FFD700] border-[#FFD700]/30 shadow-[0_0_12px_rgba(255,215,0,0.15)]"
+                                    : "bg-white/[0.02] text-gray-500 border-white/5 hover:border-white/10"
+                                }`}
                         >
-                            Executive Intelligence Console
-                        </p>
+                            <div
+                                className={`w-6 h-3.5 rounded-full relative transition-colors ${debugMode ? "bg-[#FFD700]/30" : "bg-white/10"
+                                    }`}
+                            >
+                                <div
+                                    className={`absolute top-0.5 w-2.5 h-2.5 rounded-full transition-all ${debugMode
+                                            ? "left-3 bg-[#FFD700]"
+                                            : "left-0.5 bg-gray-500"
+                                        }`}
+                                />
+                            </div>
+                            Debug Mode
+                        </button>
                     </div>
 
                     <div
@@ -640,19 +692,27 @@ export default function AdminDashboard() {
 
                             {querying && (
                                 <div className="flex flex-col items-center justify-center py-4 space-y-4">
-                                    <div className="relative">
-                                        <motion.div
-                                            animate={{ rotate: 360 }}
-                                            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-                                            className="w-10 h-10 border border-pagani-gold/20 border-t-pagani-gold rounded-full"
-                                        />
-                                        <div className="absolute inset-0 flex items-center justify-center">
-                                            <div className="w-1 h-1 bg-pagani-gold rounded-full animate-ping" />
+                                    {debugMode && loadingStep ? (
+                                        <div className="w-full px-2">
+                                            <DebugLoadingSteps step={loadingStep} />
                                         </div>
-                                    </div>
-                                    <p className="text-[10px] text-pagani-gold/60 uppercase tracking-[0.3em] animate-pulse">
-                                        Decrypting Intelligence...
-                                    </p>
+                                    ) : (
+                                        <>
+                                            <div className="relative">
+                                                <motion.div
+                                                    animate={{ rotate: 360 }}
+                                                    transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                                                    className="w-10 h-10 border border-pagani-gold/20 border-t-pagani-gold rounded-full"
+                                                />
+                                                <div className="absolute inset-0 flex items-center justify-center">
+                                                    <div className="w-1 h-1 bg-pagani-gold rounded-full animate-ping" />
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-pagani-gold/60 uppercase tracking-[0.3em] animate-pulse">
+                                                Decrypting Intelligence...
+                                            </p>
+                                        </>
+                                    )}
                                 </div>
                             )}
 
@@ -699,6 +759,11 @@ export default function AdminDashboard() {
                                             </span>
                                         ))}
                                     </div>
+
+                                    {/* Debug Panel */}
+                                    {debugMode && debugData && (
+                                        <RAGDebugPanel debug={debugData} />
+                                    )}
                                 </motion.div>
                             )}
                         </div>
