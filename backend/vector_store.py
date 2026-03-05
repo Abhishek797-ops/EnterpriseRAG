@@ -7,10 +7,12 @@ import os
 import re
 import pickle
 import logging
+import json
 import math
 import numpy as np
 import faiss
 import google.generativeai as genai
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -123,22 +125,95 @@ class VectorStore:
         self._build_index()
         self._initialized = True
 
+    def needs_pdf_ingestion(self) -> bool:
+        """Check if PDFs have already been ingested into the documents."""
+        if not self._initialized:
+            # We can't know for sure without initializing, but if there's no persisted index,
+            # we will build a fresh one from hardcoded docs, which means NO pdfs are in it.
+            if not (os.path.exists(INDEX_PATH) and os.path.exists(META_PATH)):
+                return True
+            self.initialize()
+            
+        return not any(doc.get("is_pdf") for doc in self.documents)
+
+    def ingest_pdf_chunks(self, chunks: list[dict]):
+        """Add new PDF chunks to the vector store and rebuild the index."""
+        if not chunks:
+            return
+            
+        logger.info(f"Ingesting {len(chunks)} PDF chunks into vector store...")
+        self.documents.extend(chunks)
+        
+        # We need to rebuild the entire index because adding to flat index dynamically
+        # with new embeddings is possible, but _build_index() is cleaner and rebuilds embeddings
+        # Wait, embedding everything every time is slow. Let's just embed the new chunks and add them.
+        
+        if self.embeddings is None or self.index is None:
+            self._build_index()
+        else:
+            # Embed only the new chunks
+            new_texts = [doc["content"] for doc in chunks]
+            new_embeddings = self._embed_texts(new_texts)
+            
+            # Normalize new embeddings
+            faiss.normalize_L2(new_embeddings)
+            
+            # Append to embeddings array
+            self.embeddings = np.vstack((self.embeddings, new_embeddings))
+            
+            # Add to FAISS index
+            self.index.add(new_embeddings)
+            
+            logger.info(f"FAISS index updated: {self.index.ntotal} vectors total")
+            
+            # Persist the updated state
+            self._persist()
+
     def _embed_texts(self, texts: list[str]) -> np.ndarray:
-        """Embed a list of texts using Gemini text-embedding-004."""
-        try:
-            result = genai.embed_content(
-                model=EMBEDDING_MODEL,
-                content=texts,
-                task_type="retrieval_document",
-            )
-            embeddings = np.array(result["embedding"], dtype=np.float32)
-            if embeddings.ndim == 1:
-                embeddings = embeddings.reshape(1, -1)
-            logger.info(f"Embedded {len(texts)} texts, shape: {embeddings.shape}")
-            return embeddings
-        except Exception as e:
-            logger.error(f"Embedding generation failed: {e}")
-            raise RuntimeError(f"Failed to generate embeddings: {e}")
+        """Embed a list of texts using Gemini using batches to avoid rate limits."""
+        all_embeddings = []
+        batch_size = 20
+        import time
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i+batch_size]
+            try:
+                logger.info(f"Embedding batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}...")
+                result = genai.embed_content(
+                    model=EMBEDDING_MODEL,
+                    content=batch,
+                    task_type="retrieval_document",
+                )
+                embeddings = np.array(result["embedding"], dtype=np.float32)
+                if embeddings.ndim == 1:
+                    embeddings = embeddings.reshape(1, -1)
+                all_embeddings.append(embeddings)
+                
+                # Sleep to respect rate limits (e.g., Gemini Free Tier is 15 RPM)
+                if i + batch_size < len(texts):
+                    time.sleep(5)
+            except Exception as e:
+                logger.error(f"Embedding batch generation failed: {e}")
+                # Try to sleep longer and retry once
+                logger.info("Sleeping 30s and retrying batch...")
+                time.sleep(30)
+                try:
+                    result = genai.embed_content(
+                        model=EMBEDDING_MODEL,
+                        content=batch,
+                        task_type="retrieval_document",
+                    )
+                    embeddings = np.array(result["embedding"], dtype=np.float32)
+                    if embeddings.ndim == 1:
+                        embeddings = embeddings.reshape(1, -1)
+                    all_embeddings.append(embeddings)
+                except Exception as retry_e:
+                    logger.error(f"Retry failed: {retry_e}")
+                    raise RuntimeError(f"Failed to generate embeddings: {retry_e}")
+
+        final_embeddings = np.vstack(all_embeddings) if all_embeddings else np.array([])
+        logger.info(f"Embedded {len(texts)} total texts, shape: {final_embeddings.shape}")
+        return final_embeddings
 
     def _embed_query(self, query: str) -> np.ndarray:
         """Embed a single query using Gemini text-embedding-004."""
@@ -216,13 +291,46 @@ class VectorStore:
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
 
-    def search(self, query: str, top_k: int = 3, user_role: str = "viewer") -> list[dict]:
+    def _llm_rerank(self, query: str, candidates: list[dict], top_k: int) -> list[dict]:
+        """Use Gemini to rerank candidates based on relevance to the query (0-100 score)."""
+        if not candidates:
+            return []
+            
+        try:
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            
+            prompt = f"Given the user query: '{query}'\n\n"
+            prompt += "Score each of the following document chunks on how accurately and completely it answers the query. "
+            prompt += "Return a JSON array of objects, where each object has 'idx' (int) and 'relevance_score' (int from 0 to 100).\n\n"
+            
+            for i, cand in enumerate(candidates):
+                content = cand['doc']['content'][:500].replace('\n', ' ')
+                prompt += f"[Chunk {i}] Source: {cand['doc']['source']}\nContent: {content}...\n\n"
+                
+            response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+            scores = json.loads(response.text)
+            
+            # Map scores back to candidates
+            for cand, score_dict in zip(candidates, scores):
+                cand['score'] = float(score_dict.get('relevance_score', 0))
+                
+            # Sort by new confidence score
+            candidates.sort(key=lambda x: x['score'], reverse=True)
+            return candidates[:top_k]
+            
+        except Exception as e:
+            logger.error(f"LLM Reranking failed: {e}")
+            # Fallback to RRF scores
+            return candidates[:top_k]
+
+    def search(self, query: str, top_k: int = 5, user_role: str = "viewer", filters: dict = None) -> list[dict]:
         """
-        Semantic search with role-based document filtering.
-        Returns list of {content, source, score}.
+        Semantic search with Gen-2 features: Role filtering, Metadata filters, and LLM Reranking.
         """
         if not self._initialized:
             self.initialize()
+            
+        search_k = min(20, self.index.ntotal)
 
         # --- 1. Semantic Search (FAISS) ---
         query_embedding = self._embed_query(query)
@@ -237,8 +345,22 @@ class VectorStore:
             if idx == -1:
                 continue
             doc = self.documents[idx]
-            if user_role in doc["role_access"]:
-                semantic_results.append({"idx": idx, "score": float(score), "doc": doc})
+            
+            # 1a. Filter by Role
+            if user_role not in doc["role_access"]:
+                continue
+                
+            # 1b. Filter by Metadata (if any)
+            if filters:
+                match = True
+                for k, v in filters.items():
+                    # Check if 'Zonda' is in source file name, for example
+                    if k == "model" and v.lower() not in doc["source"].lower():
+                        match = False
+                if not match:
+                    continue
+
+            semantic_results.append({"idx": idx, "score": float(score), "doc": doc})
 
         # --- 2. Keyword Search ---
         keyword_results = self._keyword_search(query, user_role, search_k)
@@ -259,20 +381,27 @@ class VectorStore:
         # Sort by fused score
         fused_results = sorted(list(fused_scores.items()), key=lambda x: x[1], reverse=True)
         
+        # Build candidate list for reranking
+        candidates = []
+        for idx, _ in fused_results[:search_k]:
+            candidates.append({"idx": idx, "doc": self.documents[idx], "score": 0.0})
+            
+        # --- 4. LLM Cross-Encoder Reranking ---
+        reranked_results = self._llm_rerank(query, candidates, top_k=top_k)
+
         # Build final returning list
         final_results = []
-        for idx, score in fused_results[:top_k]:
-            doc = self.documents[idx]
-            # Keeping the semantic score interface but it's an RRF score now
+        for res in reranked_results:
+            doc = res["doc"]
             final_results.append({
                 "content": doc["content"],
                 "source": doc["source"],
-                "score": float(score),
+                "score": res["score"],  # This is now an LLM confidence score (0-100)
             })
 
         logger.info(
-            f"Hybrid search query='{query[:50]}...' role={user_role} "
-            f"returned {len(final_results)} results"
+            f"Gen-2 Hybrid search query='{query[:50]}...' role={user_role} "
+            f"returned {len(final_results)} reranked results"
         )
         return final_results
 

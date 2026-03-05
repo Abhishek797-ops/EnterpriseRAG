@@ -70,10 +70,11 @@ The Pagani Zonda R Enterprise Intelligence system is a full-stack AI application
 
 ### RAG Pipeline
 
-1. **Agentic Router**: Decides if vector search is needed; reformulates queries using chat history
-2. **Hybrid Search**: FAISS semantic search + keyword search with Reciprocal Rank Fusion
-3. **Role-Based Filtering**: Documents filtered by user role (admin/engineer/viewer)
-4. **Response Generation**: Gemini generates response with context + system prompt
+1. **Multi-Modal Ingestion**: PDFs are parsed using PyMuPDF and Gemini Vision (`gemini-1.5-pro`) to extract complex diagrams and tables alongside text. Semantic chunking (`MarkdownTextSplitter`) preserves document structure.
+2. **Agentic Router**: Decides if vector search is needed; reformulates queries using chat history and extracts contextual metadata filters constraint tags.
+3. **Hybrid Search**: FAISS semantic search + keyword search with Reciprocal Rank Fusion, followed by metadata and role-based filtering.
+4. **LLM Reranking (Cross-Encoder)**: A secondary LLM pass (`gemini-2.5-flash`) scores and reranks the broader FAISS retrieval from 0-100 to extract the most highly relevant context.
+5. **Response Generation**: Gemini generates response with context + system prompt.
 
 ### Authentication Flow
 

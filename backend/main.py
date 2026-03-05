@@ -25,6 +25,7 @@ from auth import (
     get_current_user, users_db,
 )
 from vector_store import vector_store
+from pdf_ingester import ingest_all_pdfs
 from rag_pipeline import (
     generate_response, 
     generate_response_stream,
@@ -70,6 +71,10 @@ async def lifespan(app: FastAPI):
     # Initialize vector store
     try:
         vector_store.initialize()
+        if vector_store.needs_pdf_ingestion():
+            pdf_chunks = ingest_all_pdfs()
+            if pdf_chunks:
+                vector_store.ingest_pdf_chunks(pdf_chunks)
         logger.info("Vector store initialized successfully.")
     except Exception as e:
         logger.error(f"Vector store initialization failed: {e}")
@@ -293,8 +298,9 @@ async def chat(
             logger.info(f"Router decided to search with query: '{search_query[:50]}'")
             context_docs = vector_store.search(
                 query=search_query,
-                top_k=3,
+                top_k=5,
                 user_role=user_role,
+                filters=router_decision.get("metadata_filters")
             )
             logger.info(f"Retrieved {len(context_docs)} documents for user {username}")
         else:
@@ -380,8 +386,9 @@ async def chat_stream(
             logger.info(f"Router decided to search with query: '{search_query[:50]}'")
             context_docs = vector_store.search(
                 query=search_query,
-                top_k=3,
+                top_k=5,
                 user_role=user_role,
+                filters=router_decision.get("metadata_filters")
             )
         else:
             logger.info(f"Router decided to skip vector search for user {username}")

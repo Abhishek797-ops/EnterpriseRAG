@@ -13,7 +13,7 @@
 
 | Feature | Description |
 |---------|-------------|
-| 🤖 **RAG-Powered Chat** | AI assistant with hybrid search (semantic + keyword), streaming responses, and agentic query routing |
+| 🤖 **Multi-Modal RAG** | AI assistant with PyMuPDF image extraction, semantic chunking, dynamic metadata filtering, and LLM-Reranking (Cross-Encoder) |
 | 🔐 **JWT Authentication** | Secure login with access/refresh token rotation and role-based access (Admin, Engineer, Viewer) |
 | 🎬 **Cinematic Ignition** | Video-based intro experience with Framer Motion animations |
 | 📊 **Admin Dashboard** | Executive-style dashboard with system metrics and AI query interface |
@@ -79,10 +79,12 @@ sequenceDiagram
     FE->>FE: sanitizeInput()
     FE->>API: POST /api/chat/stream
     API->>API: Verify JWT token
-    API->>LLM: Agentic Router (needs search?)
-    LLM-->>API: {needs_search, search_query}
-    API->>VS: Hybrid search (FAISS + keyword)
-    VS-->>API: Relevant documents
+    API->>LLM: Agentic Router (needs search, metadata filters)
+    LLM-->>API: {needs_search, search_query, metadata_filters}
+    API->>VS: Initial Hybrid search (FAISS + semantic)
+    VS->>LLM: Rerank Candidate Contexts
+    LLM-->>VS: Top 5 Relevant Chunks (0-100 Score)
+    VS-->>API: Filtered + Reranked documents
     API->>LLM: Generate with context
     LLM-->>API: Stream tokens
     API-->>FE: SSE stream
@@ -163,7 +165,8 @@ npm test
 │   ├── main.py             # API endpoints + middleware
 │   ├── auth.py             # JWT auth + user management
 │   ├── rag_pipeline.py     # RAG with Gemini + memory
-│   ├── vector_store.py     # FAISS + hybrid search
+│   ├── vector_store.py     # FAISS + hybrid search + LLM Reranking
+│   ├── pdf_ingester.py     # Multi-Modal PyMuPDF ingestion & Vision Parsing
 │   ├── database.py         # SQLAlchemy config
 │   ├── models.py           # DB models
 │   ├── middleware.py        # Security middleware

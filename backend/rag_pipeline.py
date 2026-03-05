@@ -17,7 +17,7 @@ logger = logging.getLogger("pagani.rag_pipeline")
 # ── Gemini Configuration ──
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-GENERATION_MODEL = "gemini-2.5-flash-lite"
+GENERATION_MODEL = "gemini-2.5-flash"
 
 # ── Safety Settings ── Block nothing for enterprise use
 SAFETY_SETTINGS = {
@@ -47,36 +47,34 @@ def _add_to_history(username: str, question: str, answer: str):
         chat_sessions[username] = chat_sessions[username][-MAX_SESSION_TURNS * 2:]
 
 # ── System Prompts ──
-SYSTEM_PROMPT = """You are the Pagani Zonda R Enterprise Intelligence Assistant.
-You are a world-class automotive expert embedded within Pagani Automobili's internal knowledge system.
+SYSTEM_PROMPT = """You are an AI assistant specialized in Pagani hypercars and engineering.
 
-STRICT RULES:
-1. Answer ONLY from the provided context documents below.
-2. Do NOT hallucinate, fabricate, or invent any information.
-3. If the answer is not found in the provided context, respond EXACTLY with:
-   "The requested information is not available in the provided enterprise data."
-4. Maintain a professional, precise, and technically authoritative tone.
-5. When quoting specifications, be exact — do not approximate.
-6. Reference the source document when applicable.
-7. Format responses for clarity: use bullet points for lists, bold for key specs.
+Use ONLY the information provided in the context.
 
-CONTEXT DOCUMENTS:
+If the answer is not found in the context say:
+"I do not have enough information in the knowledge base."
+
+Context:
 {context}
 
-USER ROLE: {user_role}
-(Respond appropriately for this access level. Do not reference restricted documents.)
+User Question:
+{history}
+
+Provide a clear technical explanation.
 """
 
 
 ROUTER_PROMPT = """You are an intelligent query routing agent for Pagani Automobili.
 Your job is to read the user's new question and the recent chat history, then decide TWO things:
-1. Does this question require factual data from the enterprise knowledge base about the Zonda R?
-2. If YES, formulate an optimized, standalone search query by resolving any pronouns (it, the car, they) using the chat history.
+1. Does this question require factual data from the enterprise knowledge base?
+2. Formulate an optimized search query by resolving pronouns.
+3. Extract any specific metadata filters (like 'model': 'Zonda', 'model': 'Huayra', 'model': 'Utopia').
 
 Output exactly a JSON object in this format:
 {
   "needs_search": true or false,
-  "search_query": "The optimized query here, or empty string if needs_search is false"
+  "search_query": "The optimized query here",
+  "metadata_filters": {"model": "Zonda"} // only output keys if specifically requested, else omit or {}
 }
 
 CHAT HISTORY:
@@ -126,13 +124,13 @@ def agentic_router(question: str, history: list[dict]) -> dict:
 
 
 def _assess_confidence(context_docs: list[dict]) -> str:
-    """Assess confidence based on retrieval scores."""
+    """Assess confidence based on LLM reranking scores (0-100)."""
     if not context_docs:
         return "low"
     avg_score = sum(d["score"] for d in context_docs) / len(context_docs)
-    if avg_score > 0.75:
+    if avg_score > 80:
         return "high"
-    elif avg_score > 0.5:
+    elif avg_score > 50:
         return "medium"
     return "low"
 
