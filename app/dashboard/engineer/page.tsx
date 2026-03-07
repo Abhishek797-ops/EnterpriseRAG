@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiFetch } from "@/lib/api";
 import { getUser, logout, type UserInfo } from "@/lib/auth";
+import RAGDebugPanel, { DebugLoadingSteps, type DebugData } from "@/components/RAGDebugPanel";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -247,6 +248,11 @@ export default function EngineerDashboard() {
     const consoleEndRef = useRef<HTMLDivElement>(null);
     const entryIdRef = useRef(0);
 
+    // Debug mode state
+    const [debugMode, setDebugMode] = useState(false);
+    const [debugData, setDebugData] = useState<DebugData | null>(null);
+    const [loadingStep, setLoadingStep] = useState<string>("");
+
     /* ── Auth Verification ── */
     useEffect(() => {
         (async () => {
@@ -285,24 +291,56 @@ export default function EngineerDashboard() {
             ]);
             setQuery("");
             setQuerying(true);
+            setDebugData(null);
 
             try {
-                const data = await apiFetch<ChatResponse>("/api/chat", {
-                    method: "POST",
-                    body: JSON.stringify({ question: q }),
-                });
-                setConsoleEntries((prev) => [
-                    ...prev,
-                    {
-                        id: ++entryIdRef.current,
-                        type: "response",
-                        text: data.answer,
-                        timestamp: new Date().toLocaleTimeString("en-GB", { hour12: false }),
-                        confidence: data.confidence,
-                        sources: data.sources,
-                    },
-                ]);
+                if (debugMode) {
+                    setLoadingStep("embedding");
+                    await new Promise((r) => setTimeout(r, 300));
+                    setLoadingStep("searching");
+                    await new Promise((r) => setTimeout(r, 200));
+                    setLoadingStep("retrieving");
+                    await new Promise((r) => setTimeout(r, 200));
+                    setLoadingStep("reranking");
+
+                    const data = await apiFetch<ChatResponse & { debug: DebugData }>("/api/chat/debug", {
+                        method: "POST",
+                        body: JSON.stringify({ question: q }),
+                    });
+                    setLoadingStep("generating");
+                    await new Promise((r) => setTimeout(r, 150));
+                    setLoadingStep("");
+                    setConsoleEntries((prev) => [
+                        ...prev,
+                        {
+                            id: ++entryIdRef.current,
+                            type: "response",
+                            text: data.answer,
+                            timestamp: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+                            confidence: data.confidence,
+                            sources: data.sources,
+                        },
+                    ]);
+                    setDebugData(data.debug);
+                } else {
+                    const data = await apiFetch<ChatResponse>("/api/chat", {
+                        method: "POST",
+                        body: JSON.stringify({ question: q }),
+                    });
+                    setConsoleEntries((prev) => [
+                        ...prev,
+                        {
+                            id: ++entryIdRef.current,
+                            type: "response",
+                            text: data.answer,
+                            timestamp: new Date().toLocaleTimeString("en-GB", { hour12: false }),
+                            confidence: data.confidence,
+                            sources: data.sources,
+                        },
+                    ]);
+                }
             } catch (err: unknown) {
+                setLoadingStep("");
                 setConsoleEntries((prev) => [
                     ...prev,
                     {
@@ -536,14 +574,37 @@ export default function EngineerDashboard() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.5, duration: 0.5 }}
                     >
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                            <p
-                                className="text-xs text-pagani-gold/80 uppercase tracking-[0.2em]"
-                                style={{ fontFamily: "var(--font-orbitron)" }}
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                                <p
+                                    className="text-xs text-pagani-gold/80 uppercase tracking-[0.2em]"
+                                    style={{ fontFamily: "var(--font-orbitron)" }}
+                                >
+                                    Technical Query Console
+                                </p>
+                            </div>
+                            {/* Debug Mode Toggle */}
+                            <button
+                                onClick={() => setDebugMode(!debugMode)}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wider font-semibold transition-all border ${debugMode
+                                        ? "bg-[#FFD700]/10 text-[#FFD700] border-[#FFD700]/30 shadow-[0_0_12px_rgba(255,215,0,0.15)]"
+                                        : "bg-white/[0.02] text-gray-500 border-white/5 hover:border-white/10"
+                                    }`}
                             >
-                                Technical Query Console
-                            </p>
+                                <div
+                                    className={`w-6 h-3.5 rounded-full relative transition-colors ${debugMode ? "bg-[#FFD700]/30" : "bg-white/10"
+                                        }`}
+                                >
+                                    <div
+                                        className={`absolute top-0.5 w-2.5 h-2.5 rounded-full transition-all ${debugMode
+                                                ? "left-3 bg-[#FFD700]"
+                                                : "left-0.5 bg-gray-500"
+                                            }`}
+                                    />
+                                </div>
+                                Debug Mode
+                            </button>
                         </div>
 
                         <div
@@ -596,14 +657,26 @@ export default function EngineerDashboard() {
                                 ))}
                                 {querying && (
                                     <div className="flex items-center gap-2 text-gray-500">
-                                        <motion.span
-                                            animate={{ opacity: [0.3, 1, 0.3] }}
-                                            transition={{ repeat: Infinity, duration: 1.4 }}
-                                        >
-                                            ●
-                                        </motion.span>
-                                        Processing query…
+                                        {debugMode && loadingStep ? (
+                                            <div className="w-full">
+                                                <DebugLoadingSteps step={loadingStep} />
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <motion.span
+                                                    animate={{ opacity: [0.3, 1, 0.3] }}
+                                                    transition={{ repeat: Infinity, duration: 1.4 }}
+                                                >
+                                                    ●
+                                                </motion.span>
+                                                Processing query…
+                                            </>
+                                        )}
                                     </div>
+                                )}
+                                {/* Debug Panel in Console */}
+                                {debugMode && debugData && !querying && (
+                                    <RAGDebugPanel debug={debugData} />
                                 )}
                                 <div ref={consoleEndRef} />
                             </div>

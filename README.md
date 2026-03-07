@@ -18,6 +18,7 @@
 | 🎬 **Cinematic Ignition** | Video-based intro experience with Framer Motion animations |
 | 📊 **Admin Dashboard** | Executive-style dashboard with system metrics and AI query interface |
 | 🔧 **Engineer Dashboard** | Technical console with engineering-focused data access |
+| 🛡️ **Live RAG Debug** | Real-time AI pipeline trace (pipeline steps, vector search results, retrieved chunks, and latencies) |
 | 🎯 **Role-Based Data** | Documents filtered by user role — admins see financials, engineers see technical specs |
 | 💾 **Database Persistence** | SQLAlchemy ORM with PostgreSQL/SQLite for users, chat history, system logs, and analytics |
 | 🛡️ **Security Hardening** | Security headers, rate limiting, request size limits, input sanitization, CORS |
@@ -129,6 +130,10 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000)
 
 > See [docs/Setup.md](docs/Setup.md) for detailed setup instructions including Docker.
+
+### Live RAG Debug Trace
+To view the live vector search and RAG tracing dashboard, navigate to:
+[http://localhost:3000/rag-debug](http://localhost:3000/rag-debug)
 
 ---
 

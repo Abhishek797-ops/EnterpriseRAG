@@ -55,6 +55,7 @@ The Pagani Zonda R Enterprise Intelligence system is a full-stack AI application
 | `IgnitionExperience` | Cinematic intro with video playback |
 | `Navbar` | Navigation with auth state, role display |
 | `ChatAssistant` | RAG-powered AI chat with streaming |
+| `RAGDebugPanel` | Live AI processing trace component (pipeline steps, results, latencies) |
 | `ZondaScrollCanvas` | Scroll-driven image sequence animation |
 | `ZondaExperience` | HUD overlay for scroll experience |
 
@@ -90,6 +91,7 @@ User Input → sanitizeInput() → API fetch → FastAPI endpoint
     → Agentic Router (needs search?)
     → FAISS Hybrid Search (semantic + keyword, role-filtered)
     → Gemini Generation (with context + history)
-    → Response → DB persistence (ChatHistory)
-    → SSE stream to frontend → Markdown rendering
+    → Response (+ Debug Trace if requested) → DB persistence (ChatHistory)
+    → SSE stream to frontend (normal) OR JSON with debug data
+    → Markdown rendering + Live Debug Panel updates
 ```

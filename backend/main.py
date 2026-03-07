@@ -355,6 +355,100 @@ async def chat(
         )
 
 
+@app.post("/api/chat/debug")
+@limiter.limit("20/minute")
+async def chat_debug(
+    request: Request,
+    body: ChatRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Debug-enhanced RAG chat endpoint.
+    Returns the full pipeline trace alongside the normal response.
+    Existing /api/chat and /api/chat/stream are NOT modified.
+    """
+    import time as _time
+    t_start = _time.time()
+    username = current_user["username"]
+    user_role = current_user["role"]
+
+    logger.info(f"Debug chat request | user={username} | role={user_role} | q='{body.question[:80]}'")
+
+    try:
+        # Step 1: Agentic Routing
+        history = _get_history(username)
+        router_decision = agentic_router(body.question, history)
+
+        # Step 2: Search with debug info
+        context_docs = []
+        debug_info = {
+            "pipeline_steps": [
+                {"step": "query_received", "label": "Query Received", "timestamp_ms": 0}
+            ],
+            "search_results": [],
+            "retrieved_chunks": [],
+            "timing": {},
+            "router_decision": router_decision,
+        }
+
+        if router_decision.get("needs_search", True):
+            search_query = router_decision.get("search_query") or body.question
+
+            # Use the debug-enhanced search
+            search_result = vector_store.search_with_debug(
+                query=search_query,
+                top_k=5,
+                user_role=user_role,
+                filters=router_decision.get("metadata_filters")
+            )
+            context_docs = search_result["results"]
+            debug_info = search_result["debug"]
+            debug_info["router_decision"] = router_decision
+
+        # Step 3: Generate response
+        t_gen = _time.time()
+        result = generate_response(
+            question=body.question,
+            context_docs=context_docs,
+            user_role=user_role,
+            username=username,
+        )
+        gen_ms = int((_time.time() - t_gen) * 1000)
+        total_ms = int((_time.time() - t_start) * 1000)
+
+        debug_info["timing"]["generation_ms"] = gen_ms
+        debug_info["timing"]["total_ms"] = total_ms
+        debug_info["pipeline_steps"].append({
+            "step": "llm_generated",
+            "label": "LLM Response Generated",
+            "timestamp_ms": total_ms,
+        })
+
+        # Persist chat (additive, same as normal endpoint)
+        _persist_chat(username, body.question, result["answer"])
+
+        return {
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "confidence": result["confidence"],
+            "user_role": user_role,
+            "debug": debug_info,
+        }
+
+    except RuntimeError as e:
+        logger.error(f"Debug RAG pipeline error for user {username}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The AI service is temporarily unavailable. Please try again.",
+        )
+    except Exception as e:
+        logger.error(f"Unexpected debug chat error for user {username}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred processing your request.",
+        )
+
+
 @app.post("/api/chat/stream")
 @limiter.limit("20/minute")
 async def chat_stream(

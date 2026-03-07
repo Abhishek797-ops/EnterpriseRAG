@@ -150,6 +150,60 @@ data: [DONE]
 
 ---
 
+### POST `/api/chat/debug`
+
+Debug-enhanced RAG chat. Returns a full pipeline trace alongside the AI response.
+
+**Auth Required**: Yes | **Rate Limit**: 20/minute
+
+**Request Body**: Same as `/api/chat`
+
+**Response** `200`:
+```json
+{
+  "answer": "string",
+  "sources": ["string"],
+  "confidence": "high | medium | low",
+  "user_role": "string",
+  "debug": {
+    "pipeline_steps": [{"step": "string", "label": "string", "timestamp_ms": 0}],
+    "search_results": [{"source": "string", "similarity": 0, "chunk_preview": "string"}],
+    "retrieved_chunks": [{"source": "string", "content": "string", "relevance_score": 0}],
+    "timing": {"embedding_ms": 0, "search_ms": 0, "reranking_ms": 0, "generation_ms": 0, "total_ms": 0},
+    "router_decision": {}
+  }
+}
+```
+
+---
+
+### POST `/api/chat/debug`
+
+Debug-enhanced RAG chat. Returns a full pipeline trace alongside the AI response.
+
+**Auth Required**: Yes | **Rate Limit**: 20/minute
+
+**Request Body**: Same as `/api/chat`
+
+**Response** `200`:
+```json
+{
+  "answer": "string",
+  "sources": ["string"],
+  "confidence": "high | medium | low",
+  "user_role": "string",
+  "debug": {
+    "pipeline_steps": [{"step": "string", "label": "string", "timestamp_ms": 0}],
+    "search_results": [{"source": "string", "similarity": 0, "chunk_preview": "string"}],
+    "retrieved_chunks": [{"source": "string", "content": "string", "relevance_score": 0}],
+    "timing": {"embedding_ms": 0, "search_ms": 0, "reranking_ms": 0, "generation_ms": 0, "total_ms": 0},
+    "router_decision": {}
+  }
+}
+```
+
+---
+
 ### GET `/api/health`
 
 System health check (no auth required).
