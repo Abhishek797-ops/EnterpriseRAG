@@ -45,7 +45,7 @@ export default function LoginPage() {
     };
 
     return (
-        <main className="relative min-h-screen flex items-center justify-center px-4 overflow-hidden">
+        <main className="relative min-h-screen flex items-center justify-center px-4 py-12 overflow-y-auto overflow-x-hidden">
             
             {/* Background Image */}
             <div

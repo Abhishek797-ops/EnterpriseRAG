@@ -131,6 +131,11 @@ class VectorStore:
             # We can't know for sure without initializing, but if there's no persisted index,
             # we will build a fresh one from hardcoded docs, which means NO pdfs are in it.
             if not (os.path.exists(INDEX_PATH) and os.path.exists(META_PATH)):
+                # If the PDF dataset folder isn't even present (e.g., on Render deployment),
+                # do not attempt to ingest anything to save Gemini Quota and prevent crashes.
+                pdf_dir = os.path.join(os.path.dirname(__file__), "..", "pagani_intelligence_rich_dataset_25_pdfs")
+                if not os.path.exists(pdf_dir):
+                    return False
                 return True
             self.initialize()
             
