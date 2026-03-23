@@ -1,7 +1,8 @@
 """
 Pagani Zonda R – Enterprise Intelligence API
 FastAPI backend with RAG, JWT auth, rate limiting, CORS, logging,
-database persistence, security middleware, and health monitoring.
+database persistence, security middleware, health monitoring,
+enterprise RBAC, analytics, audit, document management, and WebSocket support.
 """
 
 import os
@@ -9,20 +10,27 @@ import time
 import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Request, status
+from fastapi import (
+    FastAPI, Depends, HTTPException, Request, status,
+    APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect,
+    Query as QueryParam,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, PlainTextResponse
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from auth import (
     UserRegister, UserLogin, TokenResponse, RefreshRequest,
     ChatRequest, ChatResponse, UserInfo, ErrorResponse,
     register_user, authenticate_user, refresh_access_token,
-    get_current_user, users_db,
+    get_current_user, users_db, require_permission,
+    ROLE_PERMISSIONS, VALID_ROLES,
 )
 from vector_store import vector_store
 from pdf_ingester import ingest_all_pdfs
@@ -34,7 +42,20 @@ from rag_pipeline import (
 )
 from logging_config import setup_logging, log_event
 from database import init_db, check_db_connection
-from middleware import SecurityHeadersMiddleware, RequestSizeLimitMiddleware
+from middleware import SecurityHeadersMiddleware, RequestSizeLimitMiddleware, RequestTracingMiddleware
+from error_handlers import register_error_handlers, AppError
+from audit import audit, get_audit_logs, get_login_attempts
+from analytics import (
+    get_user_engagement_metrics, get_query_success_rates,
+    get_ai_performance_metrics, get_system_health,
+    export_analytics_csv, set_server_start_time,
+)
+from document_manager import (
+    upload_document, list_documents, get_document,
+    delete_document, update_document_metadata,
+)
+from websocket_manager import ws_manager
+from cache import query_cache
 
 load_dotenv()
 
@@ -55,6 +76,7 @@ async def lifespan(app: FastAPI):
     """Initialize vector store and database on startup."""
     global SERVER_START_TIME
     SERVER_START_TIME = datetime.now(timezone.utc)
+    set_server_start_time(SERVER_START_TIME)
 
     logger.info("═" * 60)
     logger.info("  PAGANI ZONDA R — Enterprise Intelligence API")
@@ -130,7 +152,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+# ── Register Enterprise Error Handlers ──
+register_error_handlers(app)
+
 # ── Security Middleware ──
+app.add_middleware(RequestTracingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware)
 
@@ -221,6 +247,12 @@ async def health_check():
     }
 
 
+@app.get("/api/health/detailed")
+async def health_check_detailed(current_user: dict = Depends(require_permission("manage_users"))):
+    """Secure detailed health check for admins."""
+    return await health_check()
+
+
 # ═══════════════════════════════════════════
 # Auth Endpoints
 # ═══════════════════════════════════════════
@@ -241,7 +273,7 @@ async def login(request: Request, user: UserLogin):
     """Authenticate and receive JWT access + refresh tokens."""
     logger.info(f"Login attempt: {user.username}")
     log_event("pagani.api", "user_login", user_id=user.username)
-    result = authenticate_user(user)
+    result = await authenticate_user(user)
     _track_analytics("login_success", user_id=user.username)
     return result
 
@@ -527,6 +559,317 @@ async def chat_stream(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The AI service is temporarily unavailable.",
         )
+
+
+# ═══════════════════════════════════════════
+# V1 Enterprise API Router
+# ═══════════════════════════════════════════
+
+v1_router = APIRouter(prefix="/api/v1", tags=["Enterprise V1"])
+
+
+# ── Pydantic Models for V1 ──
+class RoleChangeRequest(BaseModel):
+    new_role: str = Field(..., description="New role to assign")
+
+
+class DocumentMetadataUpdate(BaseModel):
+    title: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
+# ───────────────────────────
+# RBAC Admin Endpoints
+# ───────────────────────────
+
+@v1_router.get("/admin/users", summary="List all users")
+async def v1_list_users(
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """List all registered users (admin/super_admin only)."""
+    return {
+        "users": [
+            {"username": u, "role": d["role"], "created_at": d.get("created_at", "unknown")}
+            for u, d in users_db.items()
+        ],
+        "total": len(users_db),
+    }
+
+
+@v1_router.put("/admin/users/{username}/role", summary="Change user role")
+async def v1_change_user_role(
+    username: str,
+    body: RoleChangeRequest,
+    current_user: dict = Depends(require_permission("manage_roles")),
+):
+    """Change a user's role (super_admin only)."""
+    if username not in users_db:
+        raise HTTPException(status_code=404, detail="User not found")
+    if body.new_role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(VALID_ROLES)}")
+
+    old_role = users_db[username]["role"]
+    users_db[username]["role"] = body.new_role
+
+    # Log role change
+    audit.log_role_change(
+        changed_by=current_user["username"],
+        target_user=username,
+        old_role=old_role,
+        new_role=body.new_role,
+    )
+
+    # Persist to DB
+    try:
+        from database import get_db_session
+        from models import User, RoleAuditLog
+        with get_db_session() as db:
+            user = db.query(User).filter(User.name == username).first()
+            if user:
+                user.role = body.new_role
+            db.add(RoleAuditLog(
+                changed_by=current_user["username"],
+                target_user=username,
+                old_role=old_role,
+                new_role=body.new_role,
+            ))
+    except Exception as e:
+        logger.warning(f"Role change DB persistence failed: {e}")
+
+    return {
+        "message": f"Role updated: {username} ({old_role} -> {body.new_role})",
+        "username": username,
+        "old_role": old_role,
+        "new_role": body.new_role,
+    }
+
+
+@v1_router.get("/admin/roles/audit", summary="Role change audit log")
+async def v1_role_audit_log(
+    limit: int = QueryParam(default=50, le=500),
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """View role change audit trail."""
+    logs = get_audit_logs(action="role_change", limit=limit)
+    return {"audit_logs": logs, "total": len(logs)}
+
+
+@v1_router.get("/admin/permissions", summary="View permission matrix")
+async def v1_permissions(
+    current_user: dict = Depends(get_current_user),
+):
+    """View the RBAC permission matrix."""
+    return {
+        "permissions": ROLE_PERMISSIONS,
+        "valid_roles": list(VALID_ROLES),
+        "your_role": current_user["role"],
+        "your_permissions": ROLE_PERMISSIONS.get(current_user["role"], []),
+    }
+
+
+# ───────────────────────────
+# Analytics Endpoints
+# ───────────────────────────
+
+@v1_router.get("/analytics/engagement", summary="User engagement metrics")
+async def v1_analytics_engagement(
+    days: int = QueryParam(default=30, le=365),
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """Get user engagement metrics for the specified period."""
+    return get_user_engagement_metrics(days=days)
+
+
+@v1_router.get("/analytics/queries", summary="Query success/failure rates")
+async def v1_analytics_queries(
+    days: int = QueryParam(default=30, le=365),
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """Get query success/failure rate statistics."""
+    return get_query_success_rates(days=days)
+
+
+@v1_router.get("/analytics/ai-performance", summary="AI performance metrics")
+async def v1_analytics_ai(
+    days: int = QueryParam(default=30, le=365),
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """Get AI performance metrics (confidence, latency)."""
+    return get_ai_performance_metrics(days=days)
+
+
+@v1_router.get("/analytics/system-health", summary="System health metrics")
+async def v1_system_health(
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """Get system health metrics (CPU, memory, uptime)."""
+    return get_system_health()
+
+
+@v1_router.get("/analytics/export", summary="Export analytics as CSV")
+async def v1_analytics_export(
+    days: int = QueryParam(default=30, le=365),
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """Export analytics events as CSV."""
+    csv_data = export_analytics_csv(days=days)
+    return PlainTextResponse(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=analytics_{days}d.csv"},
+    )
+
+
+# ───────────────────────────
+# Audit Endpoints
+# ───────────────────────────
+
+@v1_router.get("/audit/logs", summary="View audit logs")
+async def v1_audit_logs(
+    action: Optional[str] = None,
+    user_id: Optional[str] = None,
+    limit: int = QueryParam(default=100, le=1000),
+    offset: int = QueryParam(default=0, ge=0),
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """Admin view of all audit/system logs."""
+    logs = get_audit_logs(action=action, user_id=user_id, limit=limit, offset=offset)
+    return {"logs": logs, "total": len(logs)}
+
+
+@v1_router.get("/audit/login-attempts", summary="Login attempt history")
+async def v1_login_attempts(
+    limit: int = QueryParam(default=50, le=500),
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """View recent login attempts."""
+    attempts = get_login_attempts(limit=limit)
+    return {"attempts": attempts, "total": len(attempts)}
+
+
+# ───────────────────────────
+# Document Management Endpoints
+# ───────────────────────────
+
+@v1_router.post("/documents/upload", summary="Upload a document")
+async def v1_upload_document(
+    file: UploadFile = File(...),
+    title: Optional[str] = None,
+    current_user: dict = Depends(require_permission("write")),
+):
+    """Upload a PDF, DOCX, or TXT document for RAG ingestion."""
+    result = await upload_document(
+        file=file,
+        uploaded_by=current_user["username"],
+        title=title,
+    )
+    audit.log(
+        action=audit.ACTION_DOCUMENT_UPLOAD,
+        user_id=current_user["username"],
+        metadata={"filename": result.get("filename"), "chunks": result.get("chunk_count")},
+    )
+    return result
+
+
+@v1_router.get("/documents", summary="List documents")
+async def v1_list_documents(
+    limit: int = QueryParam(default=100, le=500),
+    offset: int = QueryParam(default=0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    """List all uploaded documents."""
+    docs = list_documents(limit=limit, offset=offset)
+    return {"documents": docs, "total": len(docs)}
+
+
+@v1_router.get("/documents/{doc_id}", summary="Get document details")
+async def v1_get_document(
+    doc_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get details of a specific document."""
+    doc = get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@v1_router.delete("/documents/{doc_id}", summary="Delete a document")
+async def v1_delete_document(
+    doc_id: str,
+    current_user: dict = Depends(require_permission("delete")),
+):
+    """Delete a document (admin only)."""
+    success = delete_document(doc_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found")
+    audit.log(
+        action=audit.ACTION_DOCUMENT_DELETE,
+        user_id=current_user["username"],
+        metadata={"document_id": doc_id},
+    )
+    return {"message": "Document deleted", "id": doc_id}
+
+
+@v1_router.put("/documents/{doc_id}/metadata", summary="Update document metadata")
+async def v1_update_document_metadata(
+    doc_id: str,
+    body: DocumentMetadataUpdate,
+    current_user: dict = Depends(require_permission("write")),
+):
+    """Update document metadata (title, tags)."""
+    result = update_document_metadata(doc_id, title=body.title, tags=body.tags)
+    if not result:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return result
+
+
+# ───────────────────────────
+# Cache Stats Endpoint
+# ───────────────────────────
+
+@v1_router.get("/cache/stats", summary="Cache statistics")
+async def v1_cache_stats(
+    current_user: dict = Depends(require_permission("manage_users")),
+):
+    """View query cache statistics."""
+    return {
+        "query_cache": query_cache.stats,
+    }
+
+
+# ───────────────────────────
+# WebSocket Endpoints
+# ───────────────────────────
+
+@v1_router.websocket("/ws/notifications")
+async def ws_notifications(websocket: WebSocket):
+    """WebSocket for real-time notifications."""
+    await ws_manager.connect(websocket, "notifications")
+    try:
+        while True:
+            # Keep connection alive, optionally receive client messages
+            data = await websocket.receive_text()
+            # Echo or handle client messages
+            await ws_manager.send_personal(websocket, {"type": "ack", "message": data})
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, "notifications")
+
+
+@v1_router.websocket("/ws/logs")
+async def ws_logs(websocket: WebSocket):
+    """WebSocket for real-time log streaming (admin only)."""
+    await ws_manager.connect(websocket, "logs")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await ws_manager.send_personal(websocket, {"type": "ack", "message": data})
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, "logs")
+
+
+# ── Mount V1 Router ──
+app.include_router(v1_router)
 
 
 # ═══════════════════════════════════════════
