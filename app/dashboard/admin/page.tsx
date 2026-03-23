@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { apiFetch } from "@/lib/api";
 import { getUser, logout, type UserInfo } from "@/lib/auth";
 import RAGDebugPanel, { DebugLoadingSteps, type DebugData } from "@/components/RAGDebugPanel";
@@ -64,7 +64,7 @@ const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> 
    ANIMATION VARIANTS
    ═══════════════════════════════════════════════════════════════ */
 
-const fadeUp: any = {
+const fadeUp: Variants = {
     hidden: { opacity: 0, y: 24 },
     visible: (i: number) => ({
         opacity: 1,
@@ -192,7 +192,7 @@ export default function AdminDashboard() {
                 setQuerying(false);
             }
         },
-        [query, querying]
+        [query, querying, debugMode]
     );
 
     const handleLogout = () => {

@@ -4,6 +4,7 @@ import { motion, useScroll, useMotionValueEvent } from "framer-motion";
 import { useState, useEffect } from "react";
 import { isAuthenticated, getStoredUser, logout } from "@/lib/auth";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 interface NavbarProps {
     onInquireClick?: () => void;
@@ -74,9 +75,9 @@ export default function Navbar({ onInquireClick }: NavbarProps) {
                 }`}
         >
             {/* Logo */}
-            <a href="/" className="text-2xl font-bold tracking-tighter uppercase text-white">
+            <Link href="/" className="text-2xl font-bold tracking-tighter uppercase text-white">
                 Pagani <span className="text-pagani-gold">Zonda R</span>
-            </a>
+            </Link>
 
             {/* Right Actions */}
             <div className="flex items-center gap-4">

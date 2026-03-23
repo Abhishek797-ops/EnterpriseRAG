@@ -3,8 +3,6 @@ Pagani Zonda R – Enterprise Analytics
 Compute engagement metrics, query stats, AI performance, and system health.
 """
 
-import os
-import time
 import logging
 import platform
 from datetime import datetime, timezone, timedelta
@@ -120,7 +118,6 @@ def get_ai_performance_metrics(days: int = 30) -> dict:
     try:
         from database import get_db_session
         from models import AnalyticsEvent
-        from sqlalchemy import func
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 

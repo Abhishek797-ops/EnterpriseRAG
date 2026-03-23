@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, type Variants } from "framer-motion";
 import { apiFetch } from "@/lib/api";
 import { getUser, logout, type UserInfo } from "@/lib/auth";
 import RAGDebugPanel, { DebugLoadingSteps, type DebugData } from "@/components/RAGDebugPanel";
@@ -211,7 +211,7 @@ const ENGINEERING_DATA: Record<SidebarSection, { heading: string; cards: DataCar
    ANIMATION VARIANTS
    ═══════════════════════════════════════════════════════════════ */
 
-const fadeUp: any = {
+const fadeUp: Variants = {
     hidden: { opacity: 0, y: 24 },
     visible: (i: number) => ({
         opacity: 1,
@@ -220,7 +220,7 @@ const fadeUp: any = {
     }),
 };
 
-const sidebarItem: any = {
+const sidebarItem: Variants = {
     hidden: { opacity: 0, x: -16 },
     visible: (i: number) => ({
         opacity: 1,
@@ -354,7 +354,7 @@ export default function EngineerDashboard() {
                 setQuerying(false);
             }
         },
-        [query, querying]
+        [query, querying, debugMode]
     );
 
     const handleLogout = () => {
@@ -619,7 +619,8 @@ export default function EngineerDashboard() {
                             <div className="h-[280px] overflow-y-auto p-4 space-y-3 font-mono text-xs">
                                 {consoleEntries.length === 0 && (
                                     <p className="text-gray-600 italic">
-                                        // Query the RAG knowledge base. Type a technical question below.
+                                        {/* Query the RAG knowledge base. Type a technical question below. */}
+                                        Query the RAG knowledge base. Type a technical question below.
                                     </p>
                                 )}
                                 {consoleEntries.map((entry) => (

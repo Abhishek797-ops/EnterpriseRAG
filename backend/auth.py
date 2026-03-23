@@ -301,7 +301,7 @@ def check_brute_force(identifier: str):
         if datetime.now(timezone.utc) < entry["locked_until"]:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Account locked due to too many failed attempts. Try again later.",
+                detail="Account locked due to too many failed attempts. Try again later.",
             )
         else:
             # Lockout expired, reset

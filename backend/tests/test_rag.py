@@ -2,7 +2,6 @@
 Tests for RAG pipeline components (no live API calls).
 """
 
-import pytest
 import sys
 import os
 

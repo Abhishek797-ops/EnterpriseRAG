@@ -8,11 +8,9 @@ import re
 import pickle
 import logging
 import json
-import math
 import numpy as np
 import faiss
 import google.generativeai as genai
-from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()

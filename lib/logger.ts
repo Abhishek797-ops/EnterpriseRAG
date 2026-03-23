@@ -73,10 +73,12 @@ export function logError(event: string, error: unknown) {
     });
 }
 
-export default {
+const logger = {
     logLogin,
     logRouteChange,
     logChatRequest,
     logChatResponse,
     logError,
 };
+
+export default logger;

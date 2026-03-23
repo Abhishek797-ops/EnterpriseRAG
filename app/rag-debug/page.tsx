@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { getUser, logout, type UserInfo } from "@/lib/auth";
+import { getUser, type UserInfo } from "@/lib/auth";
 import RAGDebugPanel, { type DebugData } from "@/components/RAGDebugPanel";
 import { apiFetch } from "@/lib/api";
 

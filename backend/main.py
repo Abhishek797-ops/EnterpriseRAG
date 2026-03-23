@@ -27,8 +27,7 @@ from dotenv import load_dotenv
 
 from auth import (
     UserRegister, UserLogin, TokenResponse, RefreshRequest,
-    ChatRequest, ChatResponse, UserInfo, ErrorResponse,
-    register_user, authenticate_user, refresh_access_token,
+    ChatRequest, ChatResponse, UserInfo, register_user, authenticate_user, refresh_access_token,
     get_current_user, users_db, require_permission,
     ROLE_PERMISSIONS, VALID_ROLES,
 )
@@ -43,7 +42,7 @@ from rag_pipeline import (
 from logging_config import setup_logging, log_event
 from database import init_db, check_db_connection
 from middleware import SecurityHeadersMiddleware, RequestSizeLimitMiddleware, RequestTracingMiddleware
-from error_handlers import register_error_handlers, AppError
+from error_handlers import register_error_handlers
 from audit import audit, get_audit_logs, get_login_attempts
 from analytics import (
     get_user_engagement_metrics, get_query_success_rates,

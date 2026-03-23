@@ -2,7 +2,6 @@
 Integration tests for V1 Enterprise API endpoints.
 """
 
-import pytest
 
 
 class TestHealthEndpoints:

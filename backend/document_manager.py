@@ -5,7 +5,6 @@ Upload, chunk, tag, version, and manage enterprise documents.
 
 import os
 import uuid
-import shutil
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -65,7 +64,7 @@ async def upload_document(
         )
 
     # Persist metadata to DB
-    doc_record = _save_document_to_db(
+    _save_document_to_db(
         doc_id=doc_id,
         filename=_name,
         file_type=ext,

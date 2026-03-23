@@ -3,7 +3,6 @@ Pagani Zonda R – WebSocket Connection Manager
 Manages WebSocket connections for real-time notifications, live logs, and query updates.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
