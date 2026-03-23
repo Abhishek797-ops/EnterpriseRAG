@@ -85,3 +85,36 @@ class AnalyticsEvent(Base):
 
     def __repr__(self):
         return f"<AnalyticsEvent(event_type='{self.event_type}')>"
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id = Column(String(36), primary_key=True, default=_generate_uuid)
+    filename = Column(String(255), nullable=False)
+    file_type = Column(String(10), nullable=False)
+    file_size = Column(String(20), nullable=True)
+    file_path = Column(String(500), nullable=True)
+    uploaded_by = Column(String(50), nullable=False, index=True)
+    title = Column(String(255), nullable=True)
+    tags = Column(JSON, nullable=True, default=list)
+    version = Column(String(10), nullable=False, default="1")
+    created_at = Column(DateTime(timezone=True), default=_utcnow, index=True)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    def __repr__(self):
+        return f"<Document(filename='{self.filename}', uploaded_by='{self.uploaded_by}')>"
+
+
+class RoleAuditLog(Base):
+    __tablename__ = "role_audit_logs"
+
+    id = Column(String(36), primary_key=True, default=_generate_uuid)
+    changed_by = Column(String(50), nullable=False, index=True)
+    target_user = Column(String(50), nullable=False, index=True)
+    old_role = Column(String(20), nullable=False)
+    new_role = Column(String(20), nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=_utcnow, index=True)
+
+    def __repr__(self):
+        return f"<RoleAuditLog(target='{self.target_user}', {self.old_role}->{self.new_role})>"
