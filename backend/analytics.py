@@ -5,6 +5,12 @@ Compute engagement metrics, query stats, AI performance, and system health.
 
 import logging
 import platform
+import asyncio
+import json
+import os
+from openai import OpenAI
+from dotenv import load_dotenv
+from audit import Auditor
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -252,16 +258,11 @@ def export_analytics_csv(days: int = 30) -> str:
 # Strategist AI Agent
 # ═══════════════════════════════════════════
 
-import asyncio
-import json
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
-from audit import Auditor
+# Imports moved to top
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-api_key = os.getenv("GROQ_API_KEY") # Groq Key
+api_key = os.getenv("GROQ_API_KEY", "dummy_key") # Groq Key
 client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
 
 class Strategist:

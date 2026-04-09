@@ -12,6 +12,7 @@ import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
+import threading
 try:
     from rank_bm25 import BM25Okapi
 except ImportError:
@@ -22,7 +23,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 logger = logging.getLogger("pagani.vector_store")
 
 # ── API Configuration ──
-api_key = os.getenv("GROQ_API_KEY") # Groq Key
+api_key = os.getenv("GROQ_API_KEY", "dummy_key") # Groq Key
 client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key, timeout=15.0, max_retries=1)
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 embedding_model = SentenceTransformer(EMBEDDING_MODEL)
@@ -97,7 +98,7 @@ PAGANI_DOCUMENTS = [
 ]
 
 
-import threading
+# import moved to top
 
 class VectorStore:
     """FAISS-based vector store with Gemini embeddings and role-based filtering."""
@@ -375,7 +376,7 @@ class VectorStore:
                         array_str = text[text.find("[") : text.rfind("]") + 1]
                         try:
                             scores = json.loads(array_str)
-                        except:
+                        except Exception:
                             # Fallback re-parse
                             scores = [int(s) for s in re.findall(r"\d+", array_str)]
                     else:

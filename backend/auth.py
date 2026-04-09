@@ -8,8 +8,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import secrets
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, Field
@@ -250,8 +251,7 @@ def verify_refresh_token(token: str) -> dict:
 # FastAPI Dependencies
 # ═══════════════════════════════════════════
 
-from fastapi import Header
-import secrets
+# Imports moved to top
 
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "pagani-super-secret-admin")
 

@@ -40,6 +40,8 @@ export async function apiFetch<T = unknown>(
 
     const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
         ...(customHeaders as Record<string, string>),
     };
 
@@ -52,7 +54,7 @@ export async function apiFetch<T = unknown>(
 
     const url = `${API_BASE_URL}${endpoint}`;
 
-    let response = await fetch(url, { headers, ...rest });
+    let response = await fetch(url, { headers, cache: "no-store", ...rest });
 
     // 401 Auto-Refresh Logic
     if (response.status === 401 && !skipAuth) {
@@ -92,6 +94,8 @@ export async function apiFetchStream(
 
     const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
         ...(customHeaders as Record<string, string>),
     };
 
@@ -103,7 +107,7 @@ export async function apiFetchStream(
     }
 
     const url = `${API_BASE_URL}${endpoint}`;
-    const response = await fetch(url, { headers, ...rest });
+    const response = await fetch(url, { headers, cache: "no-store", ...rest });
 
     if (response.status === 401) {
         clearTokens();
@@ -178,3 +182,5 @@ export class AuthError extends Error {
         this.name = "AuthError";
     }
 }
+
+export { getStoredToken as getAccessToken };

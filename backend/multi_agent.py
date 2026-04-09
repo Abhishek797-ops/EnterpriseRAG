@@ -8,11 +8,10 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-import traceback
 logger = logging.getLogger(__name__)
 
 # API Setup
-api_key = os.getenv("GROQ_API_KEY") # Groq Key
+api_key = os.getenv("GROQ_API_KEY", "dummy_key") # Groq Key
 client = AsyncOpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
 
 GENERATION_MODEL = "llama-3.3-70b-versatile"
@@ -98,7 +97,7 @@ class SynthesisAgent:
             f"Doc: '{doc.get('source', 'unknown')}' (Upload: {doc.get('uploaded_by', 'System')}):\n{doc.get('content', doc.get('text', ''))}" 
             for doc in docs[:15]
         )
-        available_sources = list({doc.get("source", "Unknown") for doc in docs})
+        # unused var removed
         
         prompt = f"""You are a master technical consultant for Pagani Automobili. 
         Your task is to analyze the provided context and draft a final response in ONE STEP.

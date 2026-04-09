@@ -6,6 +6,7 @@ File + console logging with rotation and structured format.
 import os
 import logging
 from logging.handlers import RotatingFileHandler
+from concurrent.futures import ThreadPoolExecutor
 
 # ── Log Directory ──
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
@@ -52,7 +53,7 @@ def setup_logging(level: str = "INFO"):
     )
 
 
-from concurrent.futures import ThreadPoolExecutor
+# Import moved to top
 # Global thread pool for fire-and-forget DB logging
 _log_executor = ThreadPoolExecutor(max_workers=2)
 
@@ -67,7 +68,7 @@ def _persist_log_to_db(action: str, user_id: str | None, metadata: dict | None):
                 user_id=user_id,
                 metadata_=metadata,
             ))
-    except Exception as e:
+    except Exception:
         # Avoid crashing the logger if DB is unavailable
         pass
 

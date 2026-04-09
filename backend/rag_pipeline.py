@@ -17,7 +17,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 logger = logging.getLogger("pagani.rag_pipeline")
 
 # ── API Setup ──
-api_key = os.getenv("GROQ_API_KEY") # Groq Key
+api_key = os.getenv("GROQ_API_KEY", "dummy_key") # Groq Key
 client = AsyncOpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
 
 GENERATION_MODEL = "llama-3.3-70b-versatile"
@@ -295,8 +295,6 @@ async def generate_response_stream(
 # ═══════════════════════════════════════════
 # Planner System
 # ═══════════════════════════════════════════
-import asyncio
-import numpy as np
 
 PLANNER_PROMPT = """Analyze query, respond JSON only: 
 {{"strategy":"simple|multi_hop|comparative",
@@ -320,11 +318,16 @@ class Planner:
             result = json.loads(response.choices[0].message.content)
             
             # Defaults
-            if "strategy" not in result: result["strategy"] = "simple"
-            if "sub_queries" not in result: result["sub_queries"] = [question]
-            if "complexity" not in result: result["complexity"] = "low"
-            if "needs_table" not in result: result["needs_table"] = False
-            if "needs_code" not in result: result["needs_code"] = False
+            if "strategy" not in result:
+                result["strategy"] = "simple"
+            if "sub_queries" not in result:
+                result["sub_queries"] = [question]
+            if "complexity" not in result:
+                result["complexity"] = "low"
+            if "needs_table" not in result:
+                result["needs_table"] = False
+            if "needs_code" not in result:
+                result["needs_code"] = False
                 
         except Exception as e:
             logger.warning(f"Planner failed, defaulting to simple: {e}")
@@ -372,13 +375,15 @@ class ToolExecution:
             return None
 
     def _cosine_similarity(self, v1: np.ndarray, v2: np.ndarray) -> float:
-        if v1 is None or v2 is None: return 0.0
+        if v1 is None or v2 is None:
+            return 0.0
         dot = np.dot(v1, v2)
         norm = np.linalg.norm(v1) * np.linalg.norm(v2)
         return float(dot / norm) if norm > 0 else 0.0
 
     async def _hyde_boost(self, query_emb: np.ndarray, chunks: list[dict]) -> tuple[list[dict], int]:
-        if query_emb is None: return chunks, 0
+        if query_emb is None:
+            return chunks, 0
         
         boosted_count = 0
         for chunk in chunks:
@@ -388,8 +393,10 @@ class ToolExecution:
                 try:
                     hq_arr = np.array(hq, dtype=np.float32)
                     sim = self._cosine_similarity(query_emb, hq_arr)
-                    if sim > max_sim: max_sim = sim
-                except: pass
+                    if sim > max_sim:
+                        max_sim = sim
+                except Exception:
+                    pass
                 
             if max_sim > 0.75:
                 chunk["score"] = chunk.get("score", 0.0) + 0.15
@@ -472,8 +479,10 @@ class ToolExecution:
             
             # Type filtering boosts
             ctype = doc.get("chunk_type", "")
-            if needs_table and ctype in ["table", "table_row"]: doc["score"] += 0.20
-            if needs_code and ctype == "code": doc["score"] += 0.20
+            if needs_table and ctype in ["table", "table_row"]:
+                doc["score"] += 0.20
+            if needs_code and ctype == "code":
+                doc["score"] += 0.20
             
             final_list.append(doc)
             

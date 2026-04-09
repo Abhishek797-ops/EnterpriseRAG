@@ -2,9 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { isAuthenticated, getStoredUser } from "@/lib/auth";
-import { apiFetch, apiFetchStream, AuthError, sanitizeInput } from "@/lib/api";
+import { isAuthenticated, getStoredUser, getToken } from "@/lib/auth";
+import { apiFetch, AuthError, sanitizeInput } from "@/lib/api";
 import { logChatRequest, logChatResponse, logError } from "@/lib/logger";
+import LiveActivityFeed from "@/components/LiveActivityFeed";
+import { type SSEEvent, formatSSEEvent, getScoreColor, PIPELINE_STEPS } from "@/lib/constants";
 
 interface Message {
     id: string;
@@ -14,6 +16,66 @@ interface Message {
     confidence?: string;
     isStreaming?: boolean;
     errorType?: "network" | "ai_unavailable" | "empty_response" | "unknown";
+}
+
+// ── SSE Pipeline State Types ──
+interface PlanningState {
+    strategy: string;
+    sub_queries: string[];
+    complexity: string;
+    duration_ms: number;
+}
+
+interface GatekeeperState {
+    status: string;
+    query: string;
+}
+
+interface RetrievalState {
+    chunks_found: number;
+    strategy_used: string;
+    duration_ms: number;
+    top_scores: number[];
+}
+
+interface RoutingState {
+    decision: string;
+    confidence: number;
+}
+
+interface AgentState {
+    mode: string;
+    status: string;
+    duration_ms?: number;
+    deduped_docs?: number;
+}
+
+interface CostState {
+    latency_seconds: number;
+    input_tokens: number;
+    output_tokens: number;
+    estimated_cost_usd: number;
+    total_pipeline_ms: number;
+}
+
+interface EvaluationState {
+    relevance: number;
+    accuracy: number;
+    completeness: number;
+    overall: number;
+    duration_ms: number;
+}
+
+interface PipelineState {
+    planning: PlanningState | null;
+    gatekeeper: GatekeeperState | null;
+    retrieval: RetrievalState | null;
+    routing: RoutingState | null;
+    agents: AgentState | null;
+    cost: CostState | null;
+    evaluation: EvaluationState | null;
+    currentStage: string;
+    isComplete: boolean;
 }
 
 interface ChatAssistantProps {
@@ -54,10 +116,33 @@ export default function ChatAssistant({ isOpen, onClose }: ChatAssistantProps) {
         },
     ]);
     const [input, setInput] = useState("");
+    const [selectedFormat, setSelectedFormat] = useState("Standard");
     const [isLoading, setIsLoading] = useState(false);
     const [authError, setAuthError] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const abortRef = useRef<AbortController | null>(null);
+
+    // ── SSE Pipeline State ──
+    const [pipeline, setPipeline] = useState<PipelineState>({
+        planning: null,
+        gatekeeper: null,
+        retrieval: null,
+        routing: null,
+        agents: null,
+        cost: null,
+        evaluation: null,
+        currentStage: "",
+        isComplete: false,
+    });
+
+    // ── Live Activity Feed State ──
+    const [sseEvents, setSSEEvents] = useState<SSEEvent[]>([]);
+    const [showConsole, setShowConsole] = useState(true);
+    const [showChunksDrawer, setShowChunksDrawer] = useState(false);
+    const [retrievedChunks, setRetrievedChunks] = useState<any[]>([]);
+    const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+    const [currentStep, setCurrentStep] = useState(0);
 
     const scrollToBottom = useCallback(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -94,6 +179,24 @@ export default function ChatAssistant({ isOpen, onClose }: ChatAssistantProps) {
         }
     };
 
+    const resetPipeline = useCallback(() => {
+        setPipeline({
+            planning: null,
+            gatekeeper: null,
+            retrieval: null,
+            routing: null,
+            agents: null,
+            cost: null,
+            evaluation: null,
+            currentStage: "",
+            isComplete: false,
+        });
+        setSSEEvents([]);
+        setRetrievedChunks([]);
+        setThinkingSteps([]);
+        setCurrentStep(0);
+    }, []);
+
     const handleSend = async () => {
         if (!input.trim() || isLoading) return;
 
@@ -102,7 +205,6 @@ export default function ChatAssistant({ isOpen, onClose }: ChatAssistantProps) {
             return;
         }
 
-        // Sanitize input before sending
         const sanitizedInput = sanitizeInput(input.trim());
 
         const userMessage: Message = {
@@ -115,149 +217,271 @@ export default function ChatAssistant({ isOpen, onClose }: ChatAssistantProps) {
         setInput("");
         setIsLoading(true);
         setAuthError(false);
+        resetPipeline();
 
         const startTime = Date.now();
         logChatRequest(sanitizedInput);
 
         const assistantId = generateId();
 
+        // Add placeholder assistant message
+        setMessages((prev) => [
+            ...prev,
+            {
+                id: assistantId,
+                role: "assistant",
+                content: "",
+                isStreaming: true,
+            },
+        ]);
+
+        const token = getToken();
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const controller = new AbortController();
+        abortRef.current = controller;
+
         try {
-            // Try streaming first
-            const reader = await apiFetchStream("/api/chat/stream", {
+            const response = await fetch(`${apiBase}/api/v1/chat/sse`, {
                 method: "POST",
-                body: JSON.stringify({ question: sanitizedInput }),
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ question: sanitizedInput, format: selectedFormat }),
+                signal: controller.signal,
             });
 
-            if (reader) {
-                // Streaming mode
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        id: assistantId,
-                        role: "assistant",
-                        content: "",
-                        isStreaming: true,
-                    },
-                ]);
-
-                const decoder = new TextDecoder();
-                let fullContent = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    const text = decoder.decode(value);
-                    const lines = text.split("\n");
-
-                    for (const line of lines) {
-                        if (line.startsWith("data: ")) {
-                            const data = line.slice(6);
-                            if (data === "[DONE]") continue;
-                            fullContent += data;
-                            setMessages((prev) =>
-                                prev.map((m) =>
-                                    m.id === assistantId
-                                        ? { ...m, content: fullContent }
-                                        : m
-                                )
-                            );
-                        }
-                    }
-                }
-
-                // Check for empty response
-                if (!fullContent.trim()) {
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.id === assistantId
-                                ? { ...m, content: getErrorMessage("empty_response"), isStreaming: false, errorType: "empty_response" as const }
-                                : m
-                        )
-                    );
-                } else {
-                    // Mark streaming complete
-                    setMessages((prev) =>
-                        prev.map((m) =>
-                            m.id === assistantId
-                                ? { ...m, isStreaming: false }
-                                : m
-                        )
-                    );
-                }
-
-                logChatResponse("success", Date.now() - startTime);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
             }
-        } catch (error) {
-            if (error instanceof AuthError) {
-                setAuthError(true);
-                setMessages((prev) =>
-                    prev.filter((m) => m.id !== assistantId)
-                );
-            } else {
-                // Fallback to non-streaming
-                try {
-                    const result = await apiFetch<{
-                        answer: string;
-                        sources: string[];
-                        confidence: string;
-                    }>("/api/chat", {
-                        method: "POST",
-                        body: JSON.stringify({ question: sanitizedInput }),
-                    });
 
-                    if (!result.answer?.trim()) {
-                        setMessages((prev) => [
-                            ...prev,
-                            {
-                                id: assistantId,
-                                role: "assistant",
-                                content: getErrorMessage("empty_response"),
-                                errorType: "empty_response",
-                            },
-                        ]);
-                    } else {
-                        setMessages((prev) => [
-                            ...prev,
-                            {
-                                id: assistantId,
-                                role: "assistant",
-                                content: result.answer,
-                                sources: result.sources,
-                                confidence: result.confidence,
-                            },
-                        ]);
-                    }
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error("No response body");
 
-                    logChatResponse("success", Date.now() - startTime);
-                } catch (fallbackError) {
-                    if (fallbackError instanceof AuthError) {
-                        setAuthError(true);
-                    } else {
-                        // Determine error type
-                        const errType = (fallbackError instanceof TypeError)
-                            ? "network" as const
-                            : (fallbackError instanceof Error && fallbackError.message.includes("503"))
-                                ? "ai_unavailable" as const
-                                : "unknown" as const;
+            const decoder = new TextDecoder();
+            let buffer = "";
 
-                        setMessages((prev) => [
-                            ...prev,
-                            {
-                                id: assistantId,
-                                role: "assistant",
-                                content: getErrorMessage(errType),
-                                errorType: errType,
-                            },
-                        ]);
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-                        logError("chat_error", fallbackError);
-                        logChatResponse("error", Date.now() - startTime);
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                let currentEvent = "";
+                let currentData = "";
+
+                for (const line of lines) {
+                    if (line.startsWith("event: ")) {
+                        currentEvent = line.slice(7).trim();
+                    } else if (line.startsWith("data: ")) {
+                        currentData = line.slice(6).trim();
+                    } else if (line === "" && currentEvent && currentData) {
+                        // Process complete SSE message
+                        try {
+                            const data = JSON.parse(currentData);
+
+                            switch (currentEvent) {
+                                case "progress":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: data.label || prev.currentStage,
+                                    }));
+                                    setCurrentStep(data.step || 0);
+                                    break;
+
+                                case "planning":
+                                case "planner":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "planning",
+                                        planning: data as PlanningState,
+                                    }));
+                                    setCurrentStep(1);
+                                    break;
+
+                                case "gatekeeper":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "gatekeeper",
+                                        gatekeeper: data as GatekeeperState,
+                                    }));
+                                    break;
+
+                                case "retrieval":
+                                case "chunks":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "retrieval",
+                                        retrieval: data as RetrievalState,
+                                    }));
+                                    setCurrentStep(2);
+                                    if (currentEvent === "chunks" && data.chunks) {
+                                        setRetrievedChunks(data.chunks);
+                                    }
+                                    break;
+
+                                case "routing":
+                                case "router":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "routing",
+                                        routing: data as RoutingState,
+                                    }));
+                                    break;
+
+                                case "agent":
+                                case "agents":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "agents",
+                                        agents: {
+                                            mode: data.active_agent || data.name || data.mode || "",
+                                            status: data.status || "",
+                                            duration_ms: data.duration_ms,
+                                            deduped_docs: data.deduped_docs,
+                                        },
+                                    }));
+                                    setCurrentStep(3);
+                                    break;
+
+                                case "thinking":
+                                    setThinkingSteps((prev) => [...prev, String(data.thought || data.message || "")]);
+                                    break;
+
+                                case "token":
+                                    setMessages((prev) =>
+                                        prev.map((m) =>
+                                            m.id === assistantId
+                                                ? {
+                                                      ...m,
+                                                      content: m.content + (data.text || ""),
+                                                  }
+                                                : m
+                                        )
+                                    );
+                                    break;
+
+                                case "cost":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "cost",
+                                        cost: data as CostState,
+                                    }));
+                                    break;
+
+                                case "evaluation":
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "evaluation",
+                                        evaluation: data as EvaluationState,
+                                    }));
+                                    break;
+
+                                case "result":
+                                    // Multi-agent result with answer
+                                    setMessages((prev) =>
+                                        prev.map((m) =>
+                                            m.id === assistantId
+                                                ? {
+                                                      ...m,
+                                                      content: data.answer || m.content,
+                                                      sources: data.sources || [],
+                                                      confidence: String(data.confidence ?? ""),
+                                                  }
+                                                : m
+                                        )
+                                    );
+                                    break;
+
+                                case "done":
+                                    setMessages((prev) =>
+                                        prev.map((m) =>
+                                            m.id === assistantId
+                                                ? {
+                                                      ...m,
+                                                      content: data.answer || m.content,
+                                                      confidence: String(data.confidence ?? ""),
+                                                      isStreaming: false,
+                                                  }
+                                                : m
+                                        )
+                                    );
+                                    setPipeline((prev) => ({
+                                        ...prev,
+                                        currentStage: "done",
+                                        isComplete: true,
+                                    }));
+                                    logChatResponse("success", Date.now() - startTime);
+                                    break;
+
+                                case "error":
+                                    setMessages((prev) =>
+                                        prev.map((m) =>
+                                            m.id === assistantId
+                                                ? {
+                                                      ...m,
+                                                      content: `⚠ Pipeline error: ${data.message || "Unknown error"}`,
+                                                      isStreaming: false,
+                                                      errorType: "ai_unavailable",
+                                                  }
+                                                : m
+                                        )
+                                    );
+                                    break;
+                            }
+                        } catch {
+                            // Skip malformed JSON
+                        }
+
+                        // Capture every event for the LiveActivityFeed
+                        if (currentEvent && currentEvent !== "token") {
+                            try {
+                                const payload = JSON.parse(currentData);
+                                const now = new Date();
+                                const ts = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+                                setSSEEvents((prev) => [...prev, {
+                                    timestamp: ts,
+                                    event_type: currentEvent,
+                                    payload,
+                                    human_readable: formatSSEEvent(currentEvent, payload),
+                                }]);
+                            } catch { /* skip */ }
+                        }
+
+                        currentEvent = "";
+                        currentData = "";
                     }
                 }
+            }
+        } catch (err: any) {
+            if (err.name !== "AbortError") {
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        m.id === assistantId
+                            ? {
+                                  ...m,
+                                  content: getErrorMessage("network"),
+                                  isStreaming: false,
+                                  errorType: "network",
+                              }
+                            : m
+                    )
+                );
+                logChatResponse("error", Date.now() - startTime);
             }
         } finally {
             setIsLoading(false);
+            abortRef.current = null;
+            // Ensure streaming flag is off
+            setMessages((prev) =>
+                prev.map((m) =>
+                    m.id === assistantId && m.isStreaming
+                        ? { ...m, isStreaming: false }
+                        : m
+                )
+            );
         }
     };
 
@@ -379,17 +603,23 @@ export default function ChatAssistant({ isOpen, onClose }: ChatAssistantProps) {
                                     >
                                         {/* Render markdown for assistant messages, plain text for others */}
                                         {msg.role === "assistant" && !msg.errorType ? (
-                                            <div
-                                                className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap"
-                                                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
-                                            />
+                                            <div className="relative">
+                                                <div
+                                                    className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap"
+                                                    dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
+                                                />
+                                                {/* Inline blinking cursor during token streaming */}
+                                                {msg.isStreaming && (
+                                                    <span
+                                                        className="inline-block w-[2px] h-[1.1em] bg-pagani-gold ml-0.5 align-text-bottom"
+                                                        style={{
+                                                            animation: "cursorBlink 0.8s steps(2) infinite",
+                                                        }}
+                                                    />
+                                                )}
+                                            </div>
                                         ) : (
                                             <p className="whitespace-pre-wrap">{msg.content}</p>
-                                        )}
-
-                                        {/* Streaming indicator */}
-                                        {msg.isStreaming && (
-                                            <span className="inline-block w-1.5 h-4 bg-pagani-gold ml-1 animate-pulse" />
                                         )}
 
                                         {/* Sources & Confidence */}
@@ -426,50 +656,208 @@ export default function ChatAssistant({ isOpen, onClose }: ChatAssistantProps) {
                                 </motion.div>
                             ))}
 
-                            {/* Enhanced Loading indicator */}
-                            {isLoading && (
+                            {/* Pipeline UI & Loading */}
+                            {(isLoading || (pipeline.currentStage && !pipeline.isComplete)) && (
                                 <motion.div
                                     initial={{ opacity: 0, y: 8 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ duration: 0.3 }}
-                                    className="flex justify-start"
+                                    className="flex justify-start w-full relative mb-4"
                                 >
-                                    <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex gap-1">
-                                                <span
-                                                    className="w-1.5 h-1.5 bg-pagani-gold rounded-full animate-bounce"
-                                                    style={{ animationDelay: "0ms" }}
-                                                />
-                                                <span
-                                                    className="w-1.5 h-1.5 bg-pagani-gold rounded-full animate-bounce"
-                                                    style={{ animationDelay: "150ms" }}
-                                                />
-                                                <span
-                                                    className="w-1.5 h-1.5 bg-pagani-gold rounded-full animate-bounce"
-                                                    style={{ animationDelay: "300ms" }}
+                                    <div className="bg-[#111] border border-white/10 rounded-xl px-5 py-4 w-full max-w-[95%] shadow-xl">
+                                        
+                                        {/* 4-Step Progress Bar */}
+                                        <div className="flex items-start justify-between mb-5 relative">
+                                            {/* Centered connecting line */}
+                                            <div className="absolute top-[5px] left-[10%] right-[10%] h-[2px] bg-white/10 -z-10" />
+                                            
+                                            {PIPELINE_STEPS.map((s) => {
+                                                const isActive = s.step === currentStep;
+                                                const isPast = s.step < currentStep;
+                                                return (
+                                                    <div key={s.step} className="flex flex-col items-center flex-1 z-10">
+                                                        {/* Fixed size container for the circle to ensure alignment over the line */}
+                                                        <div className="bg-[#111] px-2 mb-2 flex items-center justify-center">
+                                                            <div className={`w-3 h-3 rounded-full border-2 transition-all ${
+                                                                isActive
+                                                                    ? "bg-pagani-gold border-pagani-gold shadow-[0_0_10px_rgba(212,175,55,0.6)] animate-pulse"
+                                                                    : isPast
+                                                                        ? "bg-pagani-gold border-pagani-gold"
+                                                                        : "bg-black border-white/20"
+                                                            }`} />
+                                                        </div>
+                                                        <span className={`text-[10px] uppercase tracking-widest text-center px-1 ${
+                                                            isActive ? "text-pagani-gold" : isPast ? "text-pagani-gold/60" : "text-gray-600"
+                                                        }`}>
+                                                            {s.label}
+                                                            {isPast && " ✓"}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {/* Agent Timeline (visible during step 3) */}
+                                        {currentStep >= 3 && pipeline.agents && (
+                                            <div className="mb-3 bg-black/60 rounded-lg p-2 border border-white/5">
+                                                <div className="text-[9px] text-blue-400 uppercase tracking-wider mb-1.5">Agent Execution</div>
+                                                <div className="flex gap-2">
+                                                    {["Retriever", "Analyst", "Writer"].map((name) => (
+                                                        <div key={name} className="flex-1">
+                                                            <div className="flex items-center gap-1 mb-1">
+                                                                <div className={`w-1.5 h-1.5 rounded-full ${pipeline.agents?.mode.includes(name) ? "bg-blue-400 animate-pulse" : pipeline.agents?.status === "done" ? "bg-green-500" : "bg-white/20"}`} />
+                                                                <span className="text-[9px] text-white/60">{name}</span>
+                                                            </div>
+                                                            <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                                                                <div className={`h-full rounded-full transition-all duration-500 ${
+                                                                    pipeline.agents?.mode.includes(name) ? "bg-blue-500 w-2/3 animate-pulse" : "bg-green-500/40 w-full"
+                                                                }`} />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {/* Thinking Steps */}
+                                                {thinkingSteps.length > 0 && (
+                                                    <div className="mt-2 space-y-0.5">
+                                                        {thinkingSteps.map((t, i) => (
+                                                            <motion.div
+                                                                key={i}
+                                                                initial={{ opacity: 0, y: 4 }}
+                                                                animate={{ opacity: 1, y: 0 }}
+                                                                className="text-[9px] text-gray-500 italic pl-3 border-l border-white/10"
+                                                            >
+                                                                {t}
+                                                            </motion.div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* LiveActivityFeed Console */}
+                                        {showConsole && (
+                                            <div className="mb-3">
+                                                <LiveActivityFeed
+                                                    events={sseEvents}
+                                                    title="Backend Activity"
+                                                    height="h-28"
+                                                    onClear={() => setSSEEvents([])}
                                                 />
                                             </div>
-                                            <span className="text-xs text-pagani-gold/70 tracking-wider uppercase animate-pulse">
-                                                AI is thinking...
-                                            </span>
+                                        )}
+                                        <button
+                                            onClick={() => setShowConsole(!showConsole)}
+                                            className="text-[9px] text-white/30 hover:text-white/60 uppercase tracking-wider transition-colors mb-2"
+                                        >
+                                            {showConsole ? "Hide" : "Show"} Activity ({sseEvents.length})
+                                        </button>
+
+                                        {/* Evaluation Score Cards */}
+                                        {pipeline.evaluation && (
+                                            <div className="mt-2 grid grid-cols-3 gap-2 pb-2">
+                                                {[
+                                                    { label: "Faithfulness", value: pipeline.evaluation.relevance },
+                                                    { label: "Relevance", value: pipeline.evaluation.accuracy },
+                                                    { label: "Completeness", value: pipeline.evaluation.completeness },
+                                                ].map((card, i) => (
+                                                    <motion.div
+                                                        key={card.label}
+                                                        initial={{ opacity: 0, scale: 0.9 }}
+                                                        animate={{ opacity: 1, scale: 1 }}
+                                                        transition={{ delay: i * 0.15 }}
+                                                        className="bg-black p-2 text-center border border-white/10 rounded"
+                                                    >
+                                                        <div className="text-[8px] text-gray-500 uppercase tracking-wider">{card.label}</div>
+                                                        <div className={`text-sm font-bold ${getScoreColor(card.value || 0)}`}>
+                                                            {Math.round((card.value || 0) * 100)}%
+                                                        </div>
+                                                    </motion.div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* Cost Summary */}
+                                        {pipeline.cost && (
+                                            <div className="text-[10px] text-gray-400 mt-1">
+                                                ${pipeline.cost.estimated_cost_usd} · {pipeline.cost.input_tokens + pipeline.cost.output_tokens} tokens · {pipeline.cost.total_pipeline_ms}ms
+                                            </div>
+                                        )}
+
+                                        <div className="animate-pulse flex gap-1 mt-2 font-mono text-[10px] text-green-400">
+                                            <span className="w-1.5 h-3 bg-green-500 inline-block self-end"/>
+                                            <span>{pipeline.currentStage ? `Executing ${pipeline.currentStage.toUpperCase()}...` : "Initializing connection..."}</span>
                                         </div>
-                                        {/* Typing animation bar */}
-                                        <div className="mt-2 h-0.5 bg-pagani-gold/10 rounded-full overflow-hidden">
-                                            <motion.div
-                                                className="h-full bg-pagani-gold/40 rounded-full"
-                                                initial={{ x: "-100%" }}
-                                                animate={{ x: "100%" }}
-                                                transition={{
-                                                    repeat: Infinity,
-                                                    duration: 1.5,
-                                                    ease: "easeInOut",
-                                                }}
-                                                style={{ width: "40%" }}
-                                            />
-                                        </div>
+
                                     </div>
                                 </motion.div>
+                            )}
+
+                            {/* Chunks Drawer Toggle */}
+                            {retrievedChunks.length > 0 && pipeline.isComplete && (
+                                <div className="mb-2">
+                                    <button
+                                        onClick={() => setShowChunksDrawer(!showChunksDrawer)}
+                                        className="text-[10px] text-teal-400 hover:text-teal-300 transition-colors uppercase tracking-wider"
+                                    >
+                                        {showChunksDrawer ? "Hide" : "Show"} Context ({retrievedChunks.length} chunks)
+                                    </button>
+                                    {showChunksDrawer && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: "auto", opacity: 1 }}
+                                            className="mt-2 space-y-2 max-h-48 overflow-y-auto"
+                                        >
+                                            {retrievedChunks.map((chunk: any, i: number) => (
+                                                <div key={i} className="bg-black/60 border border-white/10 rounded-lg p-2 text-[10px]">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-400 text-[8px] uppercase">
+                                                            {chunk.chunk_type || "text"}
+                                                        </span>
+                                                        {chunk.heading_path && (
+                                                            <span className="text-white/30 truncate">{chunk.heading_path}</span>
+                                                        )}
+                                                        {chunk.score && (
+                                                            <span className={`ml-auto ${getScoreColor(chunk.score)}`}>
+                                                                {(chunk.score * 100).toFixed(0)}%
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-white/50 line-clamp-2">{chunk.text_preview || chunk.text?.slice(0, 120)}</p>
+                                                </div>
+                                            ))}
+                                        </motion.div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Feedback Buttons (after completed response) */}
+                            {pipeline.isComplete && messages.length > 1 && (
+                                <div className="flex items-center gap-2 mb-3">
+                                    <span className="text-[9px] text-white/30 uppercase tracking-wider">Was this helpful?</span>
+                                    {[1, -1].map((rating) => (
+                                        <button
+                                            key={rating}
+                                            onClick={async () => {
+                                                const lastUser = messages.filter(m => m.role === "user").pop();
+                                                try {
+                                                    const token = getToken();
+                                                    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                                                    await fetch(`${apiBase}/api/v1/query/feedback`, {
+                                                        method: "POST",
+                                                        headers: {
+                                                            "Content-Type": "application/json",
+                                                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                                                        },
+                                                        body: JSON.stringify({ query: lastUser?.content || "", rating, comment: null }),
+                                                    });
+                                                } catch { /* silent */ }
+                                            }}
+                                            className="px-2 py-1 rounded border border-white/10 text-xs hover:bg-white/10 transition-colors"
+                                        >
+                                            {rating === 1 ? "👍" : "👎"}
+                                        </button>
+                                    ))}
+                                </div>
                             )}
 
                             <div ref={messagesEndRef} />
@@ -477,6 +865,22 @@ export default function ChatAssistant({ isOpen, onClose }: ChatAssistantProps) {
 
                         {/* Input */}
                         <div className="px-4 py-3 border-t border-pagani-gold/20 bg-black/30">
+                            {/* Format Selector Pills */}
+                            <div className="flex gap-2 mb-3 overflow-x-auto hidden-scrollbar pb-1">
+                                {["Standard", "Bullet Points", "Executive Summary", "Technical Review"].map(fmt => (
+                                    <button
+                                        key={fmt}
+                                        onClick={() => setSelectedFormat(fmt)}
+                                        className={`whitespace-nowrap px-3 py-1 text-[10px] uppercase tracking-wider rounded-full border transition-all ${
+                                            selectedFormat === fmt 
+                                                ? "bg-pagani-gold/20 border-pagani-gold text-pagani-gold" 
+                                                : "bg-black border-white/10 text-white/50 hover:bg-white/5 hover:text-white"
+                                        }`}
+                                    >
+                                        {fmt}
+                                    </button>
+                                ))}
+                            </div>
                             <div className="flex items-center gap-2">
                                 <input
                                     ref={inputRef}

@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, type Variants } from "framer-motion";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { getUser, logout, type UserInfo } from "@/lib/auth";
 import RAGDebugPanel, { DebugLoadingSteps, type DebugData } from "@/components/RAGDebugPanel";
+import ChatAssistant from "@/components/ChatAssistant";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -126,6 +128,7 @@ export default function AdminDashboard() {
     const [debugMode, setDebugMode] = useState(false);
     const [debugData, setDebugData] = useState<DebugData | null>(null);
     const [loadingStep, setLoadingStep] = useState<string>("");
+    const [isChatOpen, setIsChatOpen] = useState(false);
 
     /* ── Auth Verification ── */
     useEffect(() => {
@@ -139,7 +142,8 @@ export default function AdminDashboard() {
                 setUser(me);
                 setAuthorized(true);
             } catch {
-                router.replace("/");
+                logout(); // Clear invalid tokens so they don't get stuck in a loop
+                router.replace("/login");
             } finally {
                 setLoading(false);
             }
@@ -197,7 +201,7 @@ export default function AdminDashboard() {
 
     const handleLogout = () => {
         logout();
-        router.push("/");
+        router.push("/login");
     };
 
     const maxRevenue = Math.max(...REVENUE_DATA.map((d) => d.value));
@@ -245,6 +249,27 @@ export default function AdminDashboard() {
                         <span className="hidden sm:inline text-[10px] text-gray-600 tracking-[0.25em] uppercase">
                             Executive Dashboard
                         </span>
+                        <nav className="hidden md:flex items-center gap-1 ml-4">
+                            {[
+                                { href: "/evaluations", label: "Evaluations" },
+                                { href: "/pipeline", label: "Pipeline" },
+                                { href: "/admin", label: "Admin" },
+                            ].map((link) => (
+                                <Link
+                                    key={link.href}
+                                    href={link.href}
+                                    className="text-[10px] text-gray-500 hover:text-pagani-gold uppercase tracking-wider px-2.5 py-1.5 rounded-md hover:bg-white/5 transition-all"
+                                >
+                                    {link.label}
+                                </Link>
+                            ))}
+                            <button
+                                onClick={() => setIsChatOpen(true)}
+                                className="text-[10px] text-pagani-gold/70 hover:text-pagani-gold uppercase tracking-wider px-2.5 py-1.5 rounded-md hover:bg-pagani-gold/10 transition-all border border-pagani-gold/20"
+                            >
+                                💬 AI Chat
+                            </button>
+                        </nav>
                     </div>
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2">
@@ -777,6 +802,29 @@ export default function AdminDashboard() {
                     © {new Date().getFullYear()} Pagani Automobili S.p.A. — Executive Command
                 </p>
             </footer>
+
+            {/* ── AI Chat Assistant ── */}
+            <ChatAssistant
+                isOpen={isChatOpen}
+                onClose={() => setIsChatOpen(false)}
+            />
+            {!isChatOpen && (
+                <button
+                    onClick={() => setIsChatOpen(true)}
+                    className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full flex items-center justify-center transition-all hover:scale-110 md:hidden"
+                    style={{
+                        background: "linear-gradient(135deg, rgba(212,175,55,0.2) 0%, rgba(212,175,55,0.05) 100%)",
+                        border: "1px solid rgba(212,175,55,0.35)",
+                        boxShadow: "0 0 30px rgba(212,175,55,0.1)",
+                    }}
+                    aria-label="Open AI Assistant"
+                >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="1.5">
+                        <path d="M12 2a10 10 0 0110 10c0 5.523-4.477 10-10 10a10 10 0 01-8.94-5.526L2 22l2.526-5.06A10 10 0 0112 2z" />
+                        <path d="M8 10h8M8 14h5" strokeLinecap="round" />
+                    </svg>
+                </button>
+            )}
         </div>
     );
 }

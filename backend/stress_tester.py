@@ -13,7 +13,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logger = logging.getLogger("pagani.stress_tester")
 
-api_key = os.getenv("GEMINI_API_KEY") # OpenRouter Key 
+api_key = os.getenv("GEMINI_API_KEY", "dummy_key") # OpenRouter Key 
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
 class StressTester:
@@ -249,7 +249,6 @@ class StressTester:
         
     async def run_bias_test_async(self) -> dict:
         """Async version of bias test."""
-        import asyncio
         results = []
         for probe in self.BIAS_PROBES:
             response = await self._get_response_async(probe)
@@ -349,13 +348,16 @@ class StressTester:
         yield f"event: stress_start\ndata: {json.dumps({'test': 'all'})}\n\n"
         
         bias_gen = self.run_bias_test_stream()
-        async for event in bias_gen: yield event
+        async for event in bias_gen:
+            yield event
         
         evasion_gen = self.run_evasion_test_stream()
-        async for event in evasion_gen: yield event
+        async for event in evasion_gen:
+            yield event
         
         injection_gen = self.run_injection_test_stream()
-        async for event in injection_gen: yield event
+        async for event in injection_gen:
+            yield event
         
         yield f"event: stress_done\ndata: {json.dumps({'test': 'all', 'status': 'completed'})}\n\n"
 

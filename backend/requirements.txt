@@ -25,3 +25,5 @@ ruff>=0.2.0
 python-docx
 openpyxl
 rank-bm25
+sentence-transformers
+openai

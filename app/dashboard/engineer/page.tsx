@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, type Variants } from "framer-motion";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { getUser, logout, type UserInfo } from "@/lib/auth";
 import RAGDebugPanel, { DebugLoadingSteps, type DebugData } from "@/components/RAGDebugPanel";
+import ChatAssistant from "@/components/ChatAssistant";
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -252,6 +254,7 @@ export default function EngineerDashboard() {
     const [debugMode, setDebugMode] = useState(false);
     const [debugData, setDebugData] = useState<DebugData | null>(null);
     const [loadingStep, setLoadingStep] = useState<string>("");
+    const [isChatOpen, setIsChatOpen] = useState(false);
 
     /* ── Auth Verification ── */
     useEffect(() => {
@@ -265,7 +268,8 @@ export default function EngineerDashboard() {
                 setUser(me);
                 setAuthorized(true);
             } catch {
-                router.replace("/");
+                logout(); // Clear invalid tokens so they don't get stuck in a loop
+                router.replace("/login");
             } finally {
                 setLoading(false);
             }
@@ -359,7 +363,7 @@ export default function EngineerDashboard() {
 
     const handleLogout = () => {
         logout();
-        router.push("/");
+        router.push("/login");
     };
 
     /* ── Loading / Auth gate ── */
@@ -473,6 +477,33 @@ export default function EngineerDashboard() {
                                 </motion.button>
                             ))}
                         </nav>
+
+                        {/* Platform Nav */}
+                        <div className="px-3 py-4 border-t border-white/5">
+                            <p className="text-[9px] text-gray-600 uppercase tracking-[0.2em] px-3 mb-2">
+                                Platform
+                            </p>
+                            {[
+                                { href: "/evaluations", label: "Evaluations", icon: "📊" },
+                                { href: "/pipeline", label: "Pipeline", icon: "⚡" },
+                            ].map((link) => (
+                                <Link
+                                    key={link.href}
+                                    href={link.href}
+                                    className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-left text-sm text-gray-400 hover:text-white hover:bg-white/[0.03] border border-transparent transition-all"
+                                >
+                                    <span className="text-base">{link.icon}</span>
+                                    <span style={{ fontFamily: "var(--font-rajdhani)" }}>{link.label}</span>
+                                </Link>
+                            ))}
+                            <button
+                                onClick={() => { setIsChatOpen(true); setSidebarOpen(false); }}
+                                className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-left text-sm text-pagani-gold/70 hover:text-pagani-gold hover:bg-pagani-gold/10 border border-transparent transition-all mt-1"
+                            >
+                                <span className="text-base">💬</span>
+                                <span style={{ fontFamily: "var(--font-rajdhani)" }}>AI Chat</span>
+                            </button>
+                        </div>
 
                         {/* Logout (desktop) */}
                         <div className="hidden lg:block px-6 py-4 border-t border-white/5">
@@ -714,6 +745,12 @@ export default function EngineerDashboard() {
                     </p>
                 </div>
             </main>
+
+            {/* ── AI Chat Assistant ── */}
+            <ChatAssistant
+                isOpen={isChatOpen}
+                onClose={() => setIsChatOpen(false)}
+            />
         </div>
     );
 }

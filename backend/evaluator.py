@@ -16,7 +16,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logger = logging.getLogger("pagani.evaluator")
 
-api_key = os.getenv("GROQ_API_KEY") # Groq Key 
+api_key = os.getenv("GROQ_API_KEY", "dummy_key") # Groq Key 
 client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
 
 class LLMJudge:
@@ -187,7 +187,6 @@ class Evaluator:
         latency_seconds: float = 0.0,
     ) -> dict:
         """Async version of evaluate - runs LLM judge in thread pool."""
-        import asyncio
 
         judge_scores = await asyncio.to_thread(self.judge.score, query, response, reference)
 
